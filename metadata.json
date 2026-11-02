@@ -1,0 +1,6 @@
+{
+  "name": "Bank BM Call Manager - Auto Dialer",
+  "description": "Daily automated calling workflow for Bank Branch Managers with auto re-dial queue for pending/unanswered calls and daily reports.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
