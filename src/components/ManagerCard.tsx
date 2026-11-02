@@ -16,6 +16,7 @@ import {
   Eye,
   ShieldAlert,
   UserCheck,
+  PhoneIncoming,
 } from 'lucide-react';
 import { BranchManager, CallLogEntry, CallOutcome } from '../types';
 import { CampaignCallingItem } from '../utils/staffMatcher';
@@ -27,6 +28,8 @@ interface ManagerCardProps {
   callLog?: CallLogEntry;
   onCallSingle: (manager: BranchManager, targetItem?: CampaignCallingItem) => void;
   onUpdateStatusQuick: (managerId: string, outcome: CallOutcome) => void;
+  onCallbackReceived: (managerId: string) => void;
+  onOpenEditStatus: (manager: BranchManager, targetItem?: CampaignCallingItem) => void;
   onEdit: (manager: BranchManager) => void;
   onDelete: (managerId: string) => void;
   onManageLeave: (manager: BranchManager) => void;
@@ -44,6 +47,8 @@ export const ManagerCard: React.FC<ManagerCardProps> = ({
   callLog,
   onCallSingle,
   onUpdateStatusQuick,
+  onCallbackReceived,
+  onOpenEditStatus,
   onEdit,
   onDelete,
   onManageLeave,
@@ -367,30 +372,60 @@ export const ManagerCard: React.FC<ManagerCardProps> = ({
         </div>
       )}
 
-      {/* Quick Mark Buttons for Table / List use */}
-      <div className="mt-2.5 grid grid-cols-2 gap-2 pt-2 border-t border-slate-700/50">
-        <button
-          onClick={() => onUpdateStatusQuick(manager.id, 'connected')}
-          className={`py-1.5 px-2 rounded-lg text-xs font-bold flex items-center justify-center space-x-1 transition-all ${
-            outcome === 'connected'
-              ? 'bg-emerald-600 text-white shadow-md'
-              : 'bg-emerald-950/40 hover:bg-emerald-900/60 border border-emerald-600/30 text-emerald-300'
-          }`}
-        >
-          <CheckCircle2 className="w-3.5 h-3.5" />
-          <span>बात हो गई</span>
-        </button>
+      {/* Callback Received Action (Point 10 requirement):
+          When staff marked not answered / busy, but branch calls back later,
+          this provides an immediate 1-tap update to mark Connected & clear pending queue */}
+      {outcome && outcome !== 'connected' && (
+        <div className="mt-2.5 pt-2 border-t border-slate-700/60">
+          <button
+            onClick={() => onCallbackReceived(manager.id)}
+            className="w-full py-2 px-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs flex items-center justify-center space-x-1.5 shadow-md shadow-emerald-950/40 transition-all active:scale-[0.98] border border-emerald-400/40"
+            title="शाखा से वापस कॉल आया - तुरंत 'बात हो गई' के रूप में दर्ज करें"
+          >
+            <PhoneIncoming className="w-4 h-4 text-emerald-200 animate-pulse" />
+            <span>वापस कॉल आया (बात हो गई ✅)</span>
+          </button>
+        </div>
+      )}
 
+      {/* Quick Mark & Edit Outcome Section */}
+      <div className={`mt-2.5 pt-2 border-t border-slate-700/50 space-y-1.5 ${!outcome || outcome === 'connected' ? '' : 'pt-1.5'}`}>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            onClick={() => onUpdateStatusQuick(manager.id, 'connected')}
+            className={`py-1.5 px-2 rounded-lg text-xs font-bold flex items-center justify-center space-x-1 transition-all ${
+              outcome === 'connected'
+                ? 'bg-emerald-600 text-white shadow-md'
+                : 'bg-emerald-950/40 hover:bg-emerald-900/60 border border-emerald-600/30 text-emerald-300'
+            }`}
+            title="बात हो गई (Mark Connected)"
+          >
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            <span>बात हो गई</span>
+          </button>
+
+          <button
+            onClick={() => onUpdateStatusQuick(manager.id, 'not_answered')}
+            className={`py-1.5 px-2 rounded-lg text-xs font-bold flex items-center justify-center space-x-1 transition-all ${
+              outcome === 'not_answered'
+                ? 'bg-rose-600 text-white shadow-md'
+                : 'bg-rose-950/40 hover:bg-rose-900/60 border border-rose-600/30 text-rose-300'
+            }`}
+            title="बात नहीं हुई (Mark Not Answered / Pending)"
+          >
+            <XCircle className="w-3.5 h-3.5" />
+            <span>बात नहीं हुई</span>
+          </button>
+        </div>
+
+        {/* Detailed Status & Notes Editor Button */}
         <button
-          onClick={() => onUpdateStatusQuick(manager.id, 'not_answered')}
-          className={`py-1.5 px-2 rounded-lg text-xs font-bold flex items-center justify-center space-x-1 transition-all ${
-            outcome === 'not_answered'
-              ? 'bg-rose-600 text-white shadow-md'
-              : 'bg-rose-950/40 hover:bg-rose-900/60 border border-rose-600/30 text-rose-300'
-          }`}
+          onClick={() => onOpenEditStatus(manager, targetCallingItem)}
+          className="w-full py-1 px-2 rounded-lg bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/70 text-slate-300 hover:text-white text-[11px] font-semibold flex items-center justify-center space-x-1.5 transition-colors"
+          title="कॉल स्थिति बदलें, नोट लिखें, या रीसेट करें"
         >
-          <XCircle className="w-3.5 h-3.5" />
-          <span>बात नहीं हुई</span>
+          <Edit3 className="w-3 h-3 text-blue-400" />
+          <span>स्थिति / नोट बदलें (Edit Status & Notes)</span>
         </button>
       </div>
     </div>

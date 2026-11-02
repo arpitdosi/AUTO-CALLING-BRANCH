@@ -27,6 +27,7 @@ import {
   Share2,
   Palmtree,
   EyeOff,
+  PhoneIncoming,
 } from 'lucide-react';
 
 import { BranchManager, CallOutcome, DailySession, DialingSettings, CallLogEntry, StaffContact } from './types';
@@ -50,6 +51,8 @@ import { ManagerCard } from './components/ManagerCard';
 import { LeaveModal } from './components/LeaveModal';
 import { StaffHierarchyModal } from './components/StaffHierarchyModal';
 import { RegionalStaffModal } from './components/RegionalStaffModal';
+import { ShareModal } from './components/ShareModal';
+import { EditCallStatusModal } from './components/EditCallStatusModal';
 import {
   buildDesignationCallingQueue,
   DESIGNATION_OPTIONS,
@@ -80,6 +83,7 @@ export default function App() {
   const [isAddEditOpen, setIsAddEditOpen] = useState(false);
   const [editingManager, setEditingManager] = useState<BranchManager | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isShareOpen, setIsShareOpen] = useState(false);
   const [showHowItWorks, setShowHowItWorks] = useState(false);
 
   // Point 1 & 2 Modals
@@ -87,6 +91,12 @@ export default function App() {
   const [selectedLeaveManager, setSelectedLeaveManager] = useState<BranchManager | null>(null);
   const [isHierarchyModalOpen, setIsHierarchyModalOpen] = useState(false);
   const [selectedHierarchyManager, setSelectedHierarchyManager] = useState<BranchManager | null>(null);
+
+  // Status Edit & Callback State
+  const [isStatusEditOpen, setIsStatusEditOpen] = useState(false);
+  const [statusEditManager, setStatusEditManager] = useState<BranchManager | null>(null);
+  const [statusEditTargetItem, setStatusEditTargetItem] = useState<CampaignCallingItem | undefined>(undefined);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Initialize data on mount
   useEffect(() => {
@@ -190,6 +200,74 @@ export default function App() {
   // Quick manual status update
   const handleQuickStatusUpdate = (managerId: string, outcome: CallOutcome) => {
     handleRecordCall(managerId, outcome, '', 0, []);
+  };
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage((current) => (current === msg ? null : current));
+    }, 4000);
+  };
+
+  // Point 10: One-click Callback Received - Mark as Connected & Clear from Pending Queue
+  const handleCallbackReceived = (managerId: string) => {
+    const mgr = managers.find((m) => m.id === managerId);
+    if (!mgr) return;
+    const activeTarget = designationItemByBranchId.get(managerId);
+    const targetName = activeTarget?.targetName || mgr.name;
+
+    handleRecordCall(
+      managerId,
+      'connected',
+      'शाखा से वापस कॉल आया - बात संपन्न ✅ (Incoming Callback)',
+      60,
+      ['वापस कॉल आया (Incoming)', 'बात हो गई'],
+      `${targetName} (वापस कॉल आया)`
+    );
+
+    showToast(`✓ ${mgr.branch} शाखा से वापस कॉल आया: 'बात हो गई ✅' दर्ज हुआ!`);
+  };
+
+  // Detailed save from EditCallStatusModal
+  const handleSaveCallStatus = (
+    managerId: string,
+    outcome: CallOutcome | 'clear',
+    notes: string,
+    tags: string[],
+    contactedPerson?: string
+  ) => {
+    const mgr = managers.find((m) => m.id === managerId);
+    if (!mgr) return;
+
+    if (outcome === 'clear') {
+      const newLogs = { ...session.callLogs };
+      delete newLogs[managerId];
+      const updatedSession: DailySession = {
+        ...session,
+        lastUpdatedAt: Date.now(),
+        callLogs: newLogs,
+      };
+      updateSession(updatedSession);
+      showToast(`🔄 ${mgr.branch} शाखा: कॉल स्थिति रीसेट (बाकी / Uncalled) की गई।`);
+    } else {
+      handleRecordCall(
+        managerId,
+        outcome,
+        notes,
+        outcome === 'connected' ? 60 : 0,
+        tags,
+        contactedPerson
+      );
+      const outcomeLabel =
+        outcome === 'connected'
+          ? 'बात हो गई ✅'
+          : outcome === 'not_answered'
+          ? 'बात नहीं हुई ❌'
+          : outcome === 'busy'
+          ? 'व्यस्त ⏳'
+          : 'स्विच ऑफ 📵';
+      showToast(`✓ ${mgr.branch} शाखा: स्थिति '${outcomeLabel}' अपडेट हो गई।`);
+    }
   };
 
   // Active calling managers (excluding on_leave and skipped_today for active dialing)
@@ -440,6 +518,15 @@ export default function App() {
           {/* Quick Header Actions */}
           <div className="flex items-center space-x-2">
             <button
+              onClick={() => setIsShareOpen(true)}
+              className="px-3 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black flex items-center space-x-1.5 shadow-md shadow-emerald-950/40 transition-all active:scale-95"
+              title="स्टाफ के साथ ऐप लिंक शेयर करें या Vercel लिंक बनाएं"
+            >
+              <Share2 className="w-4 h-4" />
+              <span>शेयर लिंक (Share)</span>
+            </button>
+
+            <button
               onClick={() => setIsRegionalStaffOpen(true)}
               className="px-3 py-2 bg-indigo-900/60 hover:bg-indigo-800 text-indigo-200 border border-indigo-700/60 rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition-colors"
               title="View all 452 staff of Bhavnagar region"
@@ -486,12 +573,21 @@ export default function App() {
         <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-blue-900 via-indigo-950 to-slate-900 border border-blue-700/50 p-5 sm:p-7 shadow-2xl space-y-5">
           <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
             <div className="space-y-2 max-w-2xl">
-              <div className="inline-flex items-center space-x-2 px-3 py-1 bg-blue-500/20 border border-blue-400/30 text-blue-300 rounded-full text-xs font-semibold">
-                <span>📅 Date: {session.date}</span>
-                <span>•</span>
-                <span>{stats.total} Branches Loaded</span>
-                <span>•</span>
-                <span>452 Regional Staff Added</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="inline-flex items-center space-x-2 px-3 py-1 bg-blue-500/20 border border-blue-400/30 text-blue-300 rounded-full text-xs font-semibold">
+                  <span>📅 Date: {session.date}</span>
+                  <span>•</span>
+                  <span>{stats.total} Branches Loaded</span>
+                  <span>•</span>
+                  <span>452 Regional Staff Added</span>
+                </div>
+                <button
+                  onClick={() => setIsShareOpen(true)}
+                  className="inline-flex items-center space-x-1.5 px-3 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/40 text-emerald-300 rounded-full text-xs font-bold transition-colors cursor-pointer"
+                >
+                  <Share2 className="w-3.5 h-3.5" />
+                  <span>स्टाफ को ऐप लिंक भेजें ↗</span>
+                </button>
               </div>
               <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
                 दैनिक ऑटो-कॉलिंग प्रोग्राम
@@ -882,6 +978,12 @@ export default function App() {
                 callLog={session.callLogs[m.id]}
                 onCallSingle={startSingleCall}
                 onUpdateStatusQuick={handleQuickStatusUpdate}
+                onCallbackReceived={handleCallbackReceived}
+                onOpenEditStatus={(mgr, targetItem) => {
+                  setStatusEditManager(mgr);
+                  setStatusEditTargetItem(targetItem);
+                  setIsStatusEditOpen(true);
+                }}
                 onEdit={(mgr) => {
                   setEditingManager(mgr);
                   setIsAddEditOpen(true);
@@ -969,17 +1071,40 @@ export default function App() {
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-500/40">
                               बात हो गई ✅
                             </span>
-                          ) : log?.outcome === 'not_answered' ? (
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-950 text-rose-400 border border-rose-500/40">
-                              बात नहीं हुई ❌
-                            </span>
+                          ) : log?.outcome === 'not_answered' || log?.outcome === 'busy' || log?.outcome === 'switched_off' ? (
+                            <div className="space-y-1">
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-950 text-rose-400 border border-rose-500/40 inline-block">
+                                {log.outcome === 'busy' ? 'व्यस्त ⏳' : log.outcome === 'switched_off' ? 'स्विच ऑफ 📵' : 'बात नहीं हुई ❌'}
+                              </span>
+                              <div>
+                                <button
+                                  onClick={() => handleCallbackReceived(m.id)}
+                                  className="px-2 py-0.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded text-[10px] font-bold inline-flex items-center space-x-1 shadow-sm transition-transform active:scale-95"
+                                  title="शाखा से वापस कॉल आया - बात हो गई के रूप में दर्ज करें"
+                                >
+                                  <PhoneIncoming className="w-3 h-3 text-emerald-200" />
+                                  <span>वापस कॉल आया ✅</span>
+                                </button>
+                              </div>
+                            </div>
                           ) : (
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-800 text-slate-400">
                               बाकी (Uncalled)
                             </span>
                           )}
                         </td>
-                        <td className="py-3 px-4 text-right space-x-2">
+                        <td className="py-3 px-4 text-right space-x-1.5 whitespace-nowrap">
+                          <button
+                            onClick={() => {
+                              setStatusEditManager(m);
+                              setStatusEditTargetItem(targetItem);
+                              setIsStatusEditOpen(true);
+                            }}
+                            className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg text-xs font-semibold transition-colors"
+                            title="कॉल स्थिति बदलें / नोट लिखें"
+                          >
+                            स्थिति ▾
+                          </button>
                           <button
                             onClick={() => startSingleCall(m, targetItem)}
                             className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold shadow-sm"
@@ -1071,6 +1196,37 @@ export default function App() {
         isOpen={isRegionalStaffOpen}
         onClose={() => setIsRegionalStaffOpen(false)}
       />
+
+      {/* Share / Vercel Link Modal */}
+      <ShareModal
+        isOpen={isShareOpen}
+        onClose={() => setIsShareOpen(false)}
+      />
+
+      {/* Point 10: Call Status, Callback & Outcome Editor Modal */}
+      <EditCallStatusModal
+        isOpen={isStatusEditOpen}
+        onClose={() => {
+          setIsStatusEditOpen(false);
+          setStatusEditManager(null);
+          setStatusEditTargetItem(undefined);
+        }}
+        manager={statusEditManager}
+        currentCallLog={statusEditManager ? session.callLogs[statusEditManager.id] : undefined}
+        targetOfficerName={statusEditTargetItem?.targetName}
+        targetOfficerRole={statusEditTargetItem?.targetPosition}
+        targetOfficerPhone={statusEditTargetItem?.targetPhone}
+        onSaveStatus={handleSaveCallStatus}
+      />
+
+      {/* Floating Feedback Toast */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold px-4 py-3 rounded-2xl shadow-2xl flex items-center space-x-2.5 border border-emerald-400/50 backdrop-blur-md animate-bounce">
+          <CheckCircle2 className="w-5 h-5 text-emerald-200 shrink-0" />
+          <span className="text-xs sm:text-sm tracking-wide">{toastMessage}</span>
+        </div>
+      )}
     </div>
   );
 }
+
