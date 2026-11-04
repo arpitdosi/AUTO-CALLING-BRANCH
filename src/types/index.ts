@@ -7,12 +7,15 @@ export interface StaffContact {
   notes?: string;
 }
 
+export type BranchAreaCategory = 'RURAL' | 'SEMI-URBAN' | 'URBAN' | 'RO';
+
 export interface BranchManager {
   id: string;
   name: string;
   branch: string;
   solId: string;
   branchAlpha: string;
+  areaCategory?: 'RURAL' | 'SEMI-URBAN' | 'URBAN';
   sinceWhen: string;
   phone: string;
   altPhone?: string;

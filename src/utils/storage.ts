@@ -1,7 +1,7 @@
 import { BranchManager, CallLogEntry, CallOutcome, DailySession, DialingSettings } from '../types';
 import { INITIAL_BRANCH_MANAGERS } from '../data/defaultManagers';
 
-const MANAGERS_STORAGE_KEY = 'bank_bm_managers_v1';
+const MANAGERS_STORAGE_KEY = 'bank_bm_managers_v2';
 const SESSION_PREFIX = 'bank_bm_daily_session_';
 const SETTINGS_KEY = 'bank_bm_settings_v1';
 
@@ -51,13 +51,21 @@ export function loadManagers(): BranchManager[] {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+        // Ensure areaCategory is present on all items
+        const merged = parsed.map((m: BranchManager) => {
+          const init = INITIAL_BRANCH_MANAGERS.find((im) => im.solId === m.solId || im.branchAlpha === m.branchAlpha);
+          return {
+            ...m,
+            areaCategory: m.areaCategory || init?.areaCategory || 'RURAL',
+          };
+        });
+        return merged;
       }
     }
   } catch (err) {
     console.warn('Failed reading managers from storage', err);
   }
-  // Initialize with the 59 managers from image
+  // Initialize with the 59 managers
   saveManagers(INITIAL_BRANCH_MANAGERS);
   return INITIAL_BRANCH_MANAGERS;
 }

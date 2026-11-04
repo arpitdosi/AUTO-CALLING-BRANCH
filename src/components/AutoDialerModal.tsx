@@ -472,11 +472,11 @@ export const AutoDialerModal: React.FC<AutoDialerModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-3 sm:p-4 overflow-y-auto animate-fade-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-2 sm:p-4 overflow-y-auto animate-fade-in">
       {/* Hidden anchor element to trigger tel: without popup blockers */}
       <a ref={hiddenDialAnchorRef} className="hidden" aria-hidden="true" />
 
-      <div className="relative w-full max-w-xl bg-slate-900 border-2 border-slate-700/80 rounded-3xl shadow-2xl overflow-hidden text-white flex flex-col my-auto max-h-[94vh]">
+      <div className="relative w-[96%] sm:w-full max-w-xl bg-slate-900 border-2 border-slate-700/80 rounded-2xl sm:rounded-3xl shadow-2xl overflow-hidden text-white flex flex-col my-auto max-h-[92dvh] sm:max-h-[94vh]">
         {/* Top Header */}
         <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-blue-800 px-4 sm:px-5 py-3 flex items-center justify-between border-b border-blue-500/30">
           <div className="flex items-center space-x-2">
@@ -743,8 +743,19 @@ export const AutoDialerModal: React.FC<AutoDialerModalProps> = ({
                 isPaused ? 'opacity-50 border-slate-700' : 'border-slate-700/80'
               }`}
             >
-              <div className="inline-flex items-center justify-center px-3 py-1 bg-blue-500/10 border border-blue-500/30 text-blue-300 rounded-full text-xs font-semibold tracking-wide mb-2">
-                SOL ID: <strong className="ml-1 text-white">{currentManager.solId}</strong> • Branch Alpha: {currentManager.branchAlpha}
+              <div className="inline-flex items-center justify-center px-3 py-1 bg-blue-500/10 border border-blue-500/30 text-blue-300 rounded-full text-xs font-semibold tracking-wide mb-2 flex-wrap gap-1">
+                <span>SOL ID: <strong className="ml-1 text-white">{currentManager.solId}</strong> • Branch Alpha: {currentManager.branchAlpha}</span>
+                {currentManager.areaCategory && (
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                    currentManager.areaCategory === 'RURAL'
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                      : currentManager.areaCategory === 'SEMI-URBAN'
+                      ? 'bg-teal-500/20 text-teal-300 border border-teal-500/40'
+                      : 'bg-blue-500/20 text-blue-300 border border-blue-500/40'
+                  }`}>
+                    {currentManager.areaCategory === 'RURAL' ? '🌾 Rural' : currentManager.areaCategory === 'SEMI-URBAN' ? '🏘️ Semi-Urban' : '🏙️ Urban'}
+                  </span>
+                )}
               </div>
 
               <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">

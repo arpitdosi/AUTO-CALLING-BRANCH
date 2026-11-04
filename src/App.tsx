@@ -28,6 +28,7 @@ import {
   Palmtree,
   EyeOff,
   PhoneIncoming,
+  Smartphone,
 } from 'lucide-react';
 
 import { BranchManager, CallOutcome, DailySession, DialingSettings, CallLogEntry, StaffContact } from './types';
@@ -56,6 +57,7 @@ import { EditCallStatusModal } from './components/EditCallStatusModal';
 import {
   buildDesignationCallingQueue,
   DESIGNATION_OPTIONS,
+  AREA_CATEGORY_OPTIONS,
   CampaignCallingItem,
 } from './utils/staffMatcher';
 
@@ -75,8 +77,9 @@ export default function App() {
   const [dialerRound, setDialerRound] = useState<number>(1);
   const [dialerStartIndex, setDialerStartIndex] = useState<number>(0);
 
-  // Target Designation for Daily Calling
+  // Target Designation & Area Category for Daily Calling
   const [selectedDesignation, setSelectedDesignation] = useState<string>('ALL_BM');
+  const [areaCategoryFilter, setAreaCategoryFilter] = useState<'ALL' | 'RURAL' | 'SEMI-URBAN' | 'URBAN'>('ALL');
   const [isRegionalStaffOpen, setIsRegionalStaffOpen] = useState(false);
 
   const [isReportOpen, setIsReportOpen] = useState(false);
@@ -97,6 +100,18 @@ export default function App() {
   const [statusEditManager, setStatusEditManager] = useState<BranchManager | null>(null);
   const [statusEditTargetItem, setStatusEditTargetItem] = useState<CampaignCallingItem | undefined>(undefined);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Screen size / Density mode for mobile responsiveness ('compact' | 'normal' | 'large')
+  const [screenDensity, setScreenDensity] = useState<'compact' | 'normal' | 'large'>(() => {
+    return (localStorage.getItem('bob_screen_density') as 'compact' | 'normal' | 'large') || 'normal';
+  });
+
+  const handleSetDensity = (newDensity: 'compact' | 'normal' | 'large') => {
+    setScreenDensity(newDensity);
+    localStorage.setItem('bob_screen_density', newDensity);
+    const label = newDensity === 'compact' ? 'छोटा (Compact)' : newDensity === 'large' ? 'बड़ा (Large)' : 'सामान्य (Normal)';
+    showToast(`📱 स्क्रीन साइज: ${label} सेट हुआ`);
+  };
 
   // Initialize data on mount
   useEffect(() => {
@@ -283,14 +298,20 @@ export default function App() {
     return managers.filter((m) => isManagerSkippedToday(m, today)).length;
   }, [managers, today]);
 
+  // Scoped managers based on area category selection
+  const scopedManagers = useMemo(() => {
+    if (areaCategoryFilter === 'ALL') return managers;
+    return managers.filter((m) => m.areaCategory === areaCategoryFilter);
+  }, [managers, areaCategoryFilter]);
+
   // Calculate statistics for active calling scope
   const stats = useMemo(() => {
-    const total = managers.length;
+    const total = scopedManagers.length;
     let connectedCount = 0;
     let pendingCount = 0;
     let uncalledCount = 0;
 
-    managers.forEach((m) => {
+    scopedManagers.forEach((m) => {
       const log = session.callLogs[m.id];
       if (!log) {
         uncalledCount++;
@@ -303,12 +324,12 @@ export default function App() {
 
     const completionPercent = total > 0 ? Math.round((connectedCount / total) * 100) : 0;
     return { total, connectedCount, pendingCount, uncalledCount, completionPercent };
-  }, [managers, session.callLogs]);
+  }, [scopedManagers, session.callLogs]);
 
-  // Designation-based calling queue
+  // Designation & Area-based calling queue
   const currentDesignationQueue = useMemo(() => {
-    return buildDesignationCallingQueue(selectedDesignation, managers);
-  }, [selectedDesignation, managers]);
+    return buildDesignationCallingQueue(selectedDesignation, managers, areaCategoryFilter);
+  }, [selectedDesignation, managers, areaCategoryFilter]);
 
   const activeDesignationQueue = useMemo(() => {
     return currentDesignationQueue.filter((item) => !item.isOnLeave && !item.isSkippedToday);
@@ -393,6 +414,7 @@ export default function App() {
       branch: manager.branch,
       solId: manager.solId,
       branchAlpha: manager.branchAlpha,
+      areaCategory: manager.areaCategory,
       targetName: manager.name,
       name: manager.name,
       targetPosition: 'BRANCH HEAD (शाखा प्रबंधक)',
@@ -458,6 +480,11 @@ export default function App() {
   // Filtered managers for list/table view - also matches against selected designated target officers
   const filteredManagers = useMemo(() => {
     return managers.filter((m) => {
+      // Area Category Filter
+      if (areaCategoryFilter !== 'ALL' && m.areaCategory !== areaCategoryFilter) {
+        return false;
+      }
+
       const targetItem = designationItemByBranchId.get(m.id);
       // Search filter
       const q = searchQuery.toLowerCase().trim();
@@ -489,59 +516,60 @@ export default function App() {
 
       return true;
     });
-  }, [managers, searchQuery, activeFilter, session.callLogs, today, designationItemByBranchId]);
+  }, [managers, searchQuery, activeFilter, session.callLogs, today, designationItemByBranchId, areaCategoryFilter]);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
       {/* Top Navigation Bar */}
-      <header className="sticky top-0 z-40 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-4 py-3 sm:px-6">
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/20">
-              <PhoneCall className="w-5 h-5" />
+      <header className="sticky top-0 z-40 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-3 py-2.5 sm:px-6 sm:py-3">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-2">
+          {/* Logo & Title */}
+          <div className="flex items-center space-x-2.5 min-w-0">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/20 shrink-0">
+              <PhoneCall className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
-            <div>
-              <div className="flex items-center space-x-2">
-                <h1 className="text-base sm:text-lg font-black tracking-tight text-white">
-                  Bank BM Call Manager
+            <div className="min-w-0">
+              <div className="flex items-center space-x-1.5 truncate">
+                <h1 className="text-sm sm:text-lg font-black tracking-tight text-white truncate">
+                  Bank BM Dialer
                 </h1>
-                <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">
-                  Auto-Dialer
+                <span className="hidden xs:inline-block text-[9px] sm:text-[10px] uppercase font-bold tracking-wider px-1.5 sm:px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30 shrink-0">
+                  Auto
                 </span>
               </div>
-              <p className="text-xs text-slate-400 hidden sm:block">
+              <p className="text-[11px] text-slate-400 hidden md:block truncate">
                 दैनिक 1-बाय-1 ऑटो कॉलिंग एवं पेंडिंग कॉल री-डायल सिस्टम
               </p>
             </div>
           </div>
 
-          {/* Quick Header Actions */}
-          <div className="flex items-center space-x-2">
+          {/* Quick Header Actions (Single clean row on all mobile screens) */}
+          <div className="flex items-center space-x-1.5 sm:space-x-2 shrink-0">
             <button
               onClick={() => setIsShareOpen(true)}
-              className="px-3 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black flex items-center space-x-1.5 shadow-md shadow-emerald-950/40 transition-all active:scale-95"
+              className="p-2 sm:px-3 sm:py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black flex items-center space-x-1 shadow-md shadow-emerald-950/40 transition-all active:scale-95"
               title="स्टाफ के साथ ऐप लिंक शेयर करें या Vercel लिंक बनाएं"
             >
-              <Share2 className="w-4 h-4" />
-              <span>शेयर लिंक (Share)</span>
+              <Share2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              <span className="hidden sm:inline">शेयर</span>
             </button>
 
             <button
               onClick={() => setIsRegionalStaffOpen(true)}
-              className="px-3 py-2 bg-indigo-900/60 hover:bg-indigo-800 text-indigo-200 border border-indigo-700/60 rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition-colors"
-              title="View all 452 staff of Bhavnagar region"
+              className="p-2 sm:px-3 sm:py-2 bg-indigo-900/60 hover:bg-indigo-800 text-indigo-200 border border-indigo-700/60 rounded-xl text-xs font-semibold flex items-center space-x-1 transition-colors"
+              title="460 रीजनल स्टाफ डायरेक्टरी (RO ब्लॉक)"
             >
-              <Users className="w-4 h-4 text-indigo-300" />
-              <span className="hidden md:inline">रीजनल डायरेक्टरी (452 Staff)</span>
+              <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-indigo-300" />
+              <span className="hidden md:inline">स्टाफ (460)</span>
             </button>
 
             <button
               onClick={() => setIsReportOpen(true)}
-              className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition-colors"
+              className="p-2 sm:px-3 sm:py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold flex items-center space-x-1 transition-colors"
               title="Daily Report & WhatsApp Export"
             >
-              <FileText className="w-4 h-4 text-emerald-400" />
-              <span className="hidden md:inline">दैनिक रिपोर्ट (Report)</span>
+              <FileText className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-400" />
+              <span className="hidden sm:inline">रिपोर्ट</span>
             </button>
 
             <button
@@ -549,11 +577,11 @@ export default function App() {
                 setEditingManager(null);
                 setIsAddEditOpen(true);
               }}
-              className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition-colors"
+              className="p-2 sm:px-3 sm:py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold flex items-center space-x-1 transition-colors"
               title="Add New Branch Manager"
             >
-              <UserPlus className="w-4 h-4 text-blue-400" />
-              <span className="hidden md:inline">नया जोड़ें (Add)</span>
+              <UserPlus className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-400" />
+              <span className="hidden lg:inline">नया जोड़ें</span>
             </button>
 
             <button
@@ -561,7 +589,7 @@ export default function App() {
               className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl transition-colors"
               title="Settings"
             >
-              <SettingsIcon className="w-4 h-4" />
+              <SettingsIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </button>
           </div>
         </div>
@@ -577,9 +605,9 @@ export default function App() {
                 <div className="inline-flex items-center space-x-2 px-3 py-1 bg-blue-500/20 border border-blue-400/30 text-blue-300 rounded-full text-xs font-semibold">
                   <span>📅 Date: {session.date}</span>
                   <span>•</span>
-                  <span>{stats.total} Branches Loaded</span>
+                  <span>{scopedManagers.length} {areaCategoryFilter !== 'ALL' ? `${areaCategoryFilter} ` : ''}शाखाएं (Total: 59)</span>
                   <span>•</span>
-                  <span>452 Regional Staff Added</span>
+                  <span>460 Regional Staff (RO ब्लॉक)</span>
                 </div>
                 <button
                   onClick={() => setIsShareOpen(true)}
@@ -593,7 +621,9 @@ export default function App() {
                 दैनिक ऑटो-कॉलिंग प्रोग्राम
               </h2>
               <p className="text-sm text-blue-200 leading-relaxed">
-                आज आप जिस पद के अधिकारियों को कॉल करना चाहते हैं, उसे नीचे चुनें। यदि किसी शाखा में वह अधिकारी उपलब्ध नहीं होगा, तो सिस्टम <strong>स्वतः उस शाखा के प्रबंधक (BM)</strong> का नंबर डायल करेगा!
+                आज आप जिस क्षेत्र (ग्रामीण, अर्ध-शहरी या शहरी) तथा जिस पद के अधिकारियों को कॉल करना चाहते हैं, उसे नीचे चुनें।
+                यदि किसी शाखा में वह अधिकारी उपलब्ध नहीं होगा, तो सिस्टम <strong>स्वतः उस शाखा के प्रबंधक (BM)</strong> का नंबर डायल करेगा।
+                <strong className="text-rose-300 ml-1">RO स्टाफ का नंबर कॉलिंग पाइपलाइन में हमेशा ब्लॉक रहेगा।</strong>
               </p>
             </div>
 
@@ -607,7 +637,9 @@ export default function App() {
                 <span>
                   {isCampaignPartiallyDone
                     ? `कॉलिंग जारी रखें (Resume #${resumeIndex + 1})`
-                    : `1-by-1 कॉलिंग शुरू करें`}
+                    : areaCategoryFilter !== 'ALL'
+                    ? `${AREA_CATEGORY_OPTIONS.find((a) => a.id === areaCategoryFilter)?.icon} ${AREA_CATEGORY_OPTIONS.find((a) => a.id === areaCategoryFilter)?.label} कॉलिंग शुरू करें (${scopedManagers.length})`
+                    : `1-by-1 कॉलिंग शुरू करें (${managers.length})`}
                 </span>
               </button>
 
@@ -633,6 +665,56 @@ export default function App() {
                   <span>पेंडिंग री-डायल राउंड ({stats.pendingCount})</span>
                 </button>
               )}
+            </div>
+          </div>
+
+          {/* Point 10: Area Category Selector Tabs (Rural / Semi-Urban / Urban / All) */}
+          <div className="pt-3 border-t border-blue-800/60 space-y-2">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+              <span className="text-xs font-bold text-amber-300 flex items-center space-x-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
+                <span>शाखा क्षेत्र चुनें (Select Area Category):</span>
+              </span>
+              <span className="text-[11px] text-blue-200 bg-blue-950/80 border border-blue-500/30 px-2.5 py-0.5 rounded-full font-mono flex items-center space-x-1">
+                <span>
+                  {areaCategoryFilter === 'ALL'
+                    ? 'सभी 59 शाखाएं शामिल'
+                    : areaCategoryFilter === 'RURAL'
+                    ? '🌾 केवल ग्रामीण शाखाएं (31)'
+                    : areaCategoryFilter === 'SEMI-URBAN'
+                    ? '🏘️ केवल अर्ध-शहरी शाखाएं (16)'
+                    : '🏙️ केवल शहरी शाखाएं (12)'}
+                </span>
+                <span>•</span>
+                <span className="text-rose-300 font-bold">🚫 RO स्टाफ हमेशा ब्लॉक</span>
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {AREA_CATEGORY_OPTIONS.map((area) => {
+                const isSelected = areaCategoryFilter === area.id;
+                return (
+                  <button
+                    key={area.id}
+                    onClick={() => setAreaCategoryFilter(area.id as any)}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold transition-all border flex items-center justify-between ${
+                      isSelected
+                        ? 'bg-amber-500 text-slate-950 border-amber-300 shadow-md ring-2 ring-amber-400/40'
+                        : 'bg-slate-900/80 text-slate-200 border-slate-700/80 hover:border-amber-400/60 hover:bg-slate-800'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-1.5 truncate">
+                      <span>{area.icon}</span>
+                      <span className="truncate">{area.label}</span>
+                    </div>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${
+                      isSelected ? 'bg-slate-950/20 text-slate-950 font-bold' : 'bg-slate-800 text-slate-400'
+                    }`}>
+                      {area.subLabel}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -801,30 +883,74 @@ export default function App() {
               )}
             </div>
 
-            {/* Layout Toggle */}
-            <div className="flex items-center space-x-1.5 self-end sm:self-center">
-              <button
-                onClick={() => setViewMode('grid')}
-                className={`p-2 rounded-xl text-xs font-semibold flex items-center space-x-1 transition-colors ${
-                  viewMode === 'grid'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-slate-800 text-slate-400 hover:text-white'
-                }`}
-                title="Grid Cards"
-              >
-                <LayoutGrid className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => setViewMode('table')}
-                className={`p-2 rounded-xl text-xs font-semibold flex items-center space-x-1 transition-colors ${
-                  viewMode === 'table'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-slate-800 text-slate-400 hover:text-white'
-                }`}
-                title="Table View"
-              >
-                <TableIcon className="w-4 h-4" />
-              </button>
+            {/* Screen Density & Layout Toggle */}
+            <div className="flex items-center space-x-2 self-stretch sm:self-center justify-between sm:justify-end">
+              {/* Screen Size / Density Selector */}
+              <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-[11px] font-bold">
+                <span className="text-slate-400 px-1.5 flex items-center space-x-1">
+                  <Smartphone className="w-3 h-3 text-blue-400" />
+                  <span className="hidden xs:inline">साइज:</span>
+                </span>
+                <button
+                  onClick={() => handleSetDensity('compact')}
+                  className={`px-2 py-1 rounded-lg transition-colors ${
+                    screenDensity === 'compact'
+                      ? 'bg-blue-600 text-white'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="छोटा स्क्रीन साइज (Compact)"
+                >
+                  छोटा
+                </button>
+                <button
+                  onClick={() => handleSetDensity('normal')}
+                  className={`px-2 py-1 rounded-lg transition-colors ${
+                    screenDensity === 'normal'
+                      ? 'bg-blue-600 text-white'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="सामान्य स्क्रीन साइज (Normal)"
+                >
+                  सामान्य
+                </button>
+                <button
+                  onClick={() => handleSetDensity('large')}
+                  className={`px-2 py-1 rounded-lg transition-colors ${
+                    screenDensity === 'large'
+                      ? 'bg-blue-600 text-white'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="बड़ा स्क्रीन साइज (Large)"
+                >
+                  बड़ा
+                </button>
+              </div>
+
+              {/* Layout Toggle */}
+              <div className="flex items-center space-x-1">
+                <button
+                  onClick={() => setViewMode('grid')}
+                  className={`p-2 rounded-xl text-xs font-semibold flex items-center space-x-1 transition-colors ${
+                    viewMode === 'grid'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-slate-800 text-slate-400 hover:text-white'
+                  }`}
+                  title="Grid Cards"
+                >
+                  <LayoutGrid className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setViewMode('table')}
+                  className={`p-2 rounded-xl text-xs font-semibold flex items-center space-x-1 transition-colors ${
+                    viewMode === 'table'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-slate-800 text-slate-400 hover:text-white'
+                  }`}
+                  title="Table View"
+                >
+                  <TableIcon className="w-4 h-4" />
+                </button>
+              </div>
             </div>
           </div>
 
@@ -968,7 +1094,15 @@ export default function App() {
             </button>
           </div>
         ) : viewMode === 'grid' ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div
+            className={`grid ${
+              screenDensity === 'compact'
+                ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 sm:gap-3'
+                : screenDensity === 'large'
+                ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5'
+                : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4'
+            }`}
+          >
             {filteredManagers.map((m) => (
               <ManagerCard
                 key={m.id}
@@ -976,6 +1110,7 @@ export default function App() {
                 targetCallingItem={designationItemByBranchId.get(m.id)}
                 selectedDesignation={selectedDesignation}
                 callLog={session.callLogs[m.id]}
+                density={screenDensity}
                 onCallSingle={startSingleCall}
                 onUpdateStatusQuick={handleQuickStatusUpdate}
                 onCallbackReceived={handleCallbackReceived}
@@ -1038,7 +1173,20 @@ export default function App() {
                           {m.solId}
                         </td>
                         <td className="py-3 px-4">
-                          <div className="font-bold text-white">{m.branch}</div>
+                          <div className="font-bold text-white flex items-center space-x-1.5 flex-wrap">
+                            <span>{m.branch}</span>
+                            {m.areaCategory && (
+                              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                                m.areaCategory === 'RURAL'
+                                  ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
+                                  : m.areaCategory === 'SEMI-URBAN'
+                                  ? 'bg-teal-500/15 text-teal-300 border border-teal-500/30'
+                                  : 'bg-blue-500/15 text-blue-300 border border-blue-500/30'
+                              }`}>
+                                {m.areaCategory === 'RURAL' ? '🌾 Rural' : m.areaCategory === 'SEMI-URBAN' ? '🏘️ Semi-Urban' : '🏙️ Urban'}
+                              </span>
+                            )}
+                          </div>
                           <div className="text-[10px] text-slate-500">{m.branchAlpha}</div>
                         </td>
                         <td className="py-3 px-4">

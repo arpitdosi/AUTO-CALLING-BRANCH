@@ -55,6 +55,7 @@ export const AddEditManagerModal: React.FC<AddEditManagerModalProps> = ({
       branch: (formData.branch || '').toUpperCase().trim(),
       solId: (formData.solId || '').trim(),
       branchAlpha: (formData.branchAlpha || '').toUpperCase().trim(),
+      areaCategory: formData.areaCategory || 'RURAL',
       sinceWhen: (formData.sinceWhen || '').trim(),
       phone: cleanPhone,
     };
@@ -149,17 +150,33 @@ export const AddEditManagerModal: React.FC<AddEditManagerModalProps> = ({
             </div>
           </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1">
-              Since When Branch (शाखा में पदस्थ तिथि)
-            </label>
-            <input
-              type="text"
-              value={formData.sinceWhen || ''}
-              onChange={(e) => setFormData({ ...formData, sinceWhen: e.target.value })}
-              placeholder="e.g. 23-05-2026"
-              className="w-full px-3.5 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                Since When Branch (शाखा में पदस्थ तिथि)
+              </label>
+              <input
+                type="text"
+                value={formData.sinceWhen || ''}
+                onChange={(e) => setFormData({ ...formData, sinceWhen: e.target.value })}
+                placeholder="e.g. 23-05-2026"
+                className="w-full px-3.5 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                Area Category (शाखा क्षेत्र) *
+              </label>
+              <select
+                value={formData.areaCategory || 'RURAL'}
+                onChange={(e) => setFormData({ ...formData, areaCategory: e.target.value as any })}
+                className="w-full px-3.5 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:border-blue-500"
+              >
+                <option value="RURAL">🌾 ग्रामीण (Rural)</option>
+                <option value="SEMI-URBAN">🏘️ अर्ध-शहरी (Semi-Urban)</option>
+                <option value="URBAN">🏙️ शहरी (Urban)</option>
+              </select>
+            </div>
           </div>
 
           <div className="pt-3 flex justify-end space-x-3">

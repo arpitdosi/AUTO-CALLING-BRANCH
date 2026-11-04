@@ -73,7 +73,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
   };
 
   const downloadCSV = () => {
-    const headers = ['SOL ID', 'Branch Name', 'Branch Alpha', 'Manager Name', 'Phone', 'Call Status', 'Notes', 'Tag', 'Attempt Round', 'Call Time'];
+    const headers = ['SOL ID', 'Branch Name', 'Area Category', 'Branch Alpha', 'Manager Name', 'Phone', 'Call Status', 'Notes', 'Tag', 'Attempt Round', 'Call Time'];
     const rows = managers.map((m) => {
       const log = logs[m.id];
       const outcome = log
@@ -91,8 +91,9 @@ export const ReportModal: React.FC<ReportModalProps> = ({
       const tagClean = (log?.tags?.[0] || '').replace(/,/g, ';');
       const roundClean = log?.round || '-';
       const timeClean = log ? new Date(log.timestamp).toLocaleTimeString() : '-';
+      const categoryClean = m.areaCategory || 'RURAL';
 
-      return [m.solId, `"${m.branch}"`, m.branchAlpha, `"${m.name}"`, m.phone, `"${outcome}"`, `"${notesClean}"`, `"${tagClean}"`, roundClean, timeClean].join(',');
+      return [m.solId, `"${m.branch}"`, `"${categoryClean}"`, m.branchAlpha, `"${m.name}"`, m.phone, `"${outcome}"`, `"${notesClean}"`, `"${tagClean}"`, roundClean, timeClean].join(',');
     });
 
     const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows].join('\n');

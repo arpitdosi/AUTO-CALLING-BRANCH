@@ -99,8 +99,8 @@ export const EditCallStatusModal: React.FC<EditCallStatusModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
-      <div className="bg-slate-900 border border-slate-700/80 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col max-h-[92vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
+      <div className="bg-slate-900 border border-slate-700/80 rounded-2xl w-[96%] sm:w-full max-w-lg overflow-hidden shadow-2xl flex flex-col max-h-[92dvh] sm:max-h-[92vh]">
         {/* Header */}
         <div className="bg-slate-950 px-5 py-4 border-b border-slate-800 flex items-center justify-between">
           <div className="flex items-center space-x-3">

@@ -9,6 +9,7 @@ export interface CampaignCallingItem {
   branch: string;
   solId: string;
   branchAlpha: string;
+  areaCategory?: 'RURAL' | 'SEMI-URBAN' | 'URBAN';
   targetName: string;
   name: string;
   targetPosition: string;
@@ -22,6 +23,13 @@ export interface CampaignCallingItem {
   isOnLeave: boolean;
   isSkippedToday: boolean;
 }
+
+export const AREA_CATEGORY_OPTIONS = [
+  { id: 'ALL', label: 'सभी शाखाएं', subLabel: 'All 59', icon: '🌐' },
+  { id: 'RURAL', label: 'ग्रामीण', subLabel: 'Rural (31)', icon: '🌾' },
+  { id: 'SEMI-URBAN', label: 'अर्ध-शहरी', subLabel: 'Semi-Urban (16)', icon: '🏘️' },
+  { id: 'URBAN', label: 'शहरी', subLabel: 'Urban (12)', icon: '🏙️' },
+] as const;
 
 export const DESIGNATION_OPTIONS = [
   { id: 'ALL_BM', label: '🌟 शाखा प्रबंधक (Branch Head / BM)', category: 'BRANCH HEAD' },
@@ -50,6 +58,10 @@ export function getStaffForBranch(branchName: string): RegionalEmployee[] {
   if (!normTarget) return [];
 
   return BHAVNAGAR_REGIONAL_STAFF.filter((staff) => {
+    // CRITICAL REQUIREMENT: RO staff must ALWAYS be blocked from the branch calling pipeline
+    if (staff.isROStaff || staff.category === 'RO' || staff.solId === '6106') {
+      return false;
+    }
     const normStaffBranch = normalizeBranchName(staff.branch);
     return (
       normStaffBranch === normTarget ||
@@ -60,21 +72,30 @@ export function getStaffForBranch(branchName: string): RegionalEmployee[] {
 }
 
 /**
- * Builds the designation-wise calling list for all branches:
- * 1. Matches staff with target designation in each branch.
- * 2. If > 1 staff of that designation: picks 1 (randomly or first), keeps other as alternative.
- * 3. If NO staff with that designation: automatically falls back to Branch Head (Branch Manager).
+ * Builds the designation-wise and area-wise calling list:
+ * 1. Filters branches by Area Category (RURAL / SEMI-URBAN / URBAN / ALL).
+ * 2. Matches staff with target designation in each branch.
+ * 3. If > 1 staff of that designation: picks 1 (randomly or first), keeps others as alternative.
+ * 4. If NO staff with that designation: automatically falls back to Branch Head (Branch Manager).
+ * 5. RO staff is ALWAYS excluded from the pipeline.
  */
 export function buildDesignationCallingQueue(
   selectedDesignationId: string,
-  branches: BranchManager[]
+  branches: BranchManager[],
+  areaCategoryFilter: 'ALL' | 'RURAL' | 'SEMI-URBAN' | 'URBAN' = 'ALL'
 ): CampaignCallingItem[] {
   const today = getTodayKey();
   const queue: CampaignCallingItem[] = [];
 
   const option = DESIGNATION_OPTIONS.find((d) => d.id === selectedDesignationId) || DESIGNATION_OPTIONS[0];
 
-  branches.forEach((branch) => {
+  // Filter branches by area category if not 'ALL'
+  const filteredBranches = branches.filter((b) => {
+    if (areaCategoryFilter === 'ALL') return true;
+    return b.areaCategory === areaCategoryFilter;
+  });
+
+  filteredBranches.forEach((branch) => {
     const branchStaff = getStaffForBranch(branch.branch);
 
     // If calling Branch Heads specifically
@@ -86,6 +107,7 @@ export function buildDesignationCallingQueue(
         branch: branch.branch,
         solId: branch.solId,
         branchAlpha: branch.branchAlpha,
+        areaCategory: branch.areaCategory,
         targetName: branch.name,
         name: branch.name,
         targetPosition: 'BRANCH HEAD (शाखा प्रबंधक)',
@@ -102,7 +124,7 @@ export function buildDesignationCallingQueue(
       return;
     }
 
-    // Filter staff for this designation
+    // Filter staff for this designation (all RO staff already excluded)
     let matchingStaff: RegionalEmployee[] = [];
     if (option.id === 'CREDIT') {
       matchingStaff = branchStaff.filter(
@@ -132,6 +154,7 @@ export function buildDesignationCallingQueue(
         branch: branch.branch,
         solId: branch.solId,
         branchAlpha: branch.branchAlpha,
+        areaCategory: branch.areaCategory,
         targetName: chosen.name,
         name: chosen.name,
         targetPosition: chosen.position,
@@ -154,6 +177,7 @@ export function buildDesignationCallingQueue(
         branch: branch.branch,
         solId: branch.solId,
         branchAlpha: branch.branchAlpha,
+        areaCategory: branch.areaCategory,
         targetName: branch.name,
         name: branch.name,
         targetPosition: `BRANCH HEAD (Fallback - No ${option.label.split('(')[0].trim()} posted)`,

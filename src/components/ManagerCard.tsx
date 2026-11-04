@@ -38,6 +38,7 @@ interface ManagerCardProps {
   isSkippedToday: boolean;
   isOnLeave: boolean;
   whatsappTemplate: string;
+  density?: 'compact' | 'normal' | 'large';
 }
 
 export const ManagerCard: React.FC<ManagerCardProps> = ({
@@ -57,6 +58,7 @@ export const ManagerCard: React.FC<ManagerCardProps> = ({
   isSkippedToday,
   isOnLeave,
   whatsappTemplate,
+  density = 'normal',
 }) => {
   const outcome = callLog?.outcome;
 
@@ -153,7 +155,13 @@ export const ManagerCard: React.FC<ManagerCardProps> = ({
 
   return (
     <div
-      className={`relative bg-slate-800/90 rounded-2xl p-4 border transition-all duration-200 hover:shadow-xl ${
+      className={`relative bg-slate-800/90 rounded-2xl border transition-all duration-200 hover:shadow-xl flex flex-col justify-between h-full w-full overflow-hidden ${
+        density === 'compact'
+          ? 'p-3 text-xs'
+          : density === 'large'
+          ? 'p-4 sm:p-5 text-sm sm:text-base'
+          : 'p-3.5 sm:p-4 text-xs sm:text-sm'
+      } ${
         isOnLeave
           ? 'border-amber-500/40 bg-amber-950/10'
           : isSkippedToday
@@ -167,267 +175,279 @@ export const ManagerCard: React.FC<ManagerCardProps> = ({
           : 'border-slate-700 hover:border-slate-600'
       }`}
     >
-      {/* Top Sol ID and Status */}
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <div className="flex items-center space-x-1.5 flex-wrap">
-          <span className="px-2 py-0.5 bg-blue-500/10 text-blue-300 border border-blue-500/30 rounded text-xs font-mono font-bold">
-            SOL {manager.solId}
-          </span>
-          <span className="px-2 py-0.5 bg-slate-700/60 text-slate-300 rounded text-[11px] font-mono">
-            {manager.branchAlpha}
-          </span>
-          {altCount > 0 && (
-            <span className="px-1.5 py-0.5 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded text-[10px] font-bold flex items-center space-x-1">
-              <Users className="w-3 h-3" />
-              <span>+{altCount} Other Staff</span>
+      {/* Top Section */}
+      <div>
+        {/* Top Sol ID, Area Category and Status */}
+        <div className="flex items-center justify-between gap-1.5 mb-2">
+          <div className="flex items-center space-x-1 flex-wrap gap-y-1 min-w-0">
+            <span className="px-1.5 sm:px-2 py-0.5 bg-blue-500/10 text-blue-300 border border-blue-500/30 rounded text-[11px] sm:text-xs font-mono font-bold">
+              SOL {manager.solId}
             </span>
-          )}
-        </div>
-        <div>{getStatusBadge()}</div>
-      </div>
-
-      {/* Main Info Header: Dynamically Displays Selected Designation Officer */}
-      <div className="mt-1">
-        <div className="flex items-start justify-between">
-          <div className="space-y-0.5">
-            {/* Prominent Target Officer Name */}
-            <h4 className="text-base font-black text-white leading-tight flex items-center space-x-1.5">
-              <span>{activeName}</span>
-              {isCustomDesignation && !isFallback && (
-                <UserCheck className="w-4 h-4 text-emerald-400 inline" />
-              )}
-            </h4>
-
-            {/* Target Role Badge */}
-            <div className="flex items-center flex-wrap gap-1.5 pt-0.5">
-              <span
-                className={`inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
-                  isCustomDesignation
-                    ? 'bg-indigo-500/25 text-indigo-200 border border-indigo-400/40'
-                    : 'bg-blue-500/15 text-blue-300 border border-blue-400/30'
-                }`}
-              >
-                <span>📌 {activeRole}</span>
-                {isCustomDesignation && targetCallingItem?.targetGrade && (
-                  <span className="text-indigo-300">• {targetCallingItem.targetGrade}</span>
-                )}
+            <span className="px-1.5 py-0.5 bg-slate-700/60 text-slate-300 rounded text-[10px] sm:text-[11px] font-mono">
+              {manager.branchAlpha}
+            </span>
+            {manager.areaCategory && (
+              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${
+                manager.areaCategory === 'RURAL'
+                  ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                  : manager.areaCategory === 'SEMI-URBAN'
+                  ? 'bg-teal-500/15 text-teal-300 border-teal-500/30'
+                  : 'bg-blue-500/15 text-blue-300 border-blue-500/30'
+              }`}>
+                {manager.areaCategory === 'RURAL' ? '🌾 Rural' : manager.areaCategory === 'SEMI-URBAN' ? '🏘️ Semi-Urban' : '🏙️ Urban'}
               </span>
-
-              {isFallback && (
-                <span className="px-2 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded-full text-[10px] font-bold flex items-center space-x-1">
-                  <ShieldAlert className="w-3 h-3" />
-                  <span>शाखा प्रबंधक (Fallback)</span>
-                </span>
-              )}
-            </div>
-
-            {/* Branch Name */}
-            <div className="flex items-center space-x-1 text-xs font-bold text-emerald-400 mt-1">
-              <MapPin className="w-3.5 h-3.5 inline text-emerald-400 shrink-0" />
-              <span>{manager.branch} Branch</span>
-              {isCustomDesignation && !isFallback && (
-                <span className="text-[11px] text-slate-400 font-normal">
-                  (BM: {manager.name})
-                </span>
-              )}
-            </div>
-          </div>
-
-          <div className="flex items-center space-x-1 text-slate-400">
-            <button
-              onClick={() => onEdit(manager)}
-              className="p-1.5 hover:text-blue-300 hover:bg-slate-700 rounded-lg transition-colors"
-              title="Edit Manager Details"
-            >
-              <Edit3 className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={() => onDelete(manager.id)}
-              className="p-1.5 hover:text-rose-400 hover:bg-slate-700 rounded-lg transition-colors"
-              title="Delete Manager"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </div>
-
-        {manager.sinceWhen && (
-          <div className="flex items-center space-x-1 text-[11px] text-slate-400 mt-1">
-            <Calendar className="w-3 h-3 text-slate-500" />
-            <span>Since: {manager.sinceWhen}</span>
-          </div>
-        )}
-
-        {isOnLeave && manager.leaveReason && (
-          <div className="text-[11px] text-amber-300 mt-1 italic">
-            कारण: {manager.leaveReason}
-          </div>
-        )}
-      </div>
-
-      {/* Phone Number Display for Active Target */}
-      <div className="mt-3 py-2 px-3 bg-slate-900/90 rounded-xl flex items-center justify-between border border-slate-700/80 shadow-inner">
-        <div>
-          <span className="text-[10px] text-slate-400 block font-semibold">
-            {isCustomDesignation ? `कॉल: ${activeRole}` : '1st Call (BM)'}
-          </span>
-          <div className="font-mono text-sm sm:text-base font-black text-amber-300 tracking-wider">
-            +91 {activePhone}
-          </div>
-        </div>
-        <div className="flex items-center space-x-2">
-          <button
-            onClick={() => onCallSingle(manager, targetCallingItem)}
-            className="p-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl shadow-md hover:shadow-emerald-900/50 transition-all active:scale-95"
-            title={`Call ${activeName} (${activeRole})`}
-          >
-            <Phone className="w-4 h-4" />
-          </button>
-          <button
-            onClick={openWhatsApp}
-            className="p-2.5 bg-emerald-800/40 hover:bg-emerald-700/60 border border-emerald-600/40 text-emerald-300 rounded-xl transition-colors"
-            title="Message on WhatsApp"
-          >
-            <MessageSquare className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-
-      {/* Point 1, 2, 3 Action Bar */}
-      <div className="mt-2.5 pt-2 border-t border-slate-700/60 flex items-center justify-between text-xs gap-1.5">
-        {/* Leave button */}
-        <button
-          onClick={() => onManageLeave(manager)}
-          className={`px-2 py-1 rounded-lg font-semibold flex items-center space-x-1 text-[11px] transition-colors ${
-            isOnLeave
-              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-              : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-          }`}
-          title="छुट्टी / DND सेट करें"
-        >
-          <Palmtree className="w-3.5 h-3.5 text-amber-400" />
-          <span>{isOnLeave ? 'छुट्टी संपादित' : 'छुट्टी / DND'}</span>
-        </button>
-
-        {/* Staff hierarchy button */}
-        <button
-          onClick={() => onManageHierarchy(manager)}
-          className={`px-2 py-1 rounded-lg font-semibold flex items-center space-x-1 text-[11px] transition-colors ${
-            backupCount > 0
-              ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40'
-              : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-          }`}
-          title="शाखा स्टाफ एवं 2nd Call सेट करें"
-        >
-          <Users className="w-3.5 h-3.5 text-indigo-400" />
-          <span>स्टाफ ({backupCount})</span>
-        </button>
-
-        {/* Skip Today Toggle */}
-        <button
-          onClick={() => onToggleSkipToday(manager.id)}
-          className={`px-2 py-1 rounded-lg font-semibold flex items-center space-x-1 text-[11px] transition-colors ${
-            isSkippedToday
-              ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
-              : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-          }`}
-          title="आज कॉल न करें"
-        >
-          {isSkippedToday ? (
-            <>
-              <Eye className="w-3.5 h-3.5 text-emerald-400" />
-              <span>आज शामिल करें</span>
-            </>
-          ) : (
-            <>
-              <EyeOff className="w-3.5 h-3.5 text-slate-400" />
-              <span>आज छोड़ें</span>
-            </>
-          )}
-        </button>
-      </div>
-
-      {/* Call Log Notes or Tags if existing */}
-      {callLog && (callLog.notes || callLog.tags?.length || callLog.timestamp) && (
-        <div className="mt-2.5 pt-2 border-t border-slate-700/60 text-[11px] text-slate-400 space-y-1">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] text-slate-500">
-              Round {callLog.round} •{' '}
-              {new Date(callLog.timestamp).toLocaleTimeString([], {
-                hour: '2-digit',
-                minute: '2-digit',
-              })}
-            </span>
-            {callLog.tags?.[0] && (
-              <span className="px-1.5 py-0.5 bg-blue-900/60 text-blue-200 border border-blue-500/30 rounded text-[10px] font-semibold">
-                {callLog.tags[0]}
+            )}
+            {altCount > 0 && (
+              <span className="px-1.5 py-0.5 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded text-[10px] font-bold flex items-center space-x-1">
+                <Users className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+                <span>+{altCount}</span>
               </span>
             )}
           </div>
-          {callLog.notes && (
-            <div className="text-slate-300 italic bg-slate-900/50 p-1.5 rounded text-[11px]">
-              "{callLog.notes}"
+          <div className="shrink-0">{getStatusBadge()}</div>
+        </div>
+
+        {/* Main Info Header: Dynamically Displays Selected Designation Officer */}
+        <div className="mt-1">
+          <div className="flex items-start justify-between gap-2">
+            <div className="space-y-0.5 min-w-0 flex-1">
+              {/* Prominent Target Officer Name */}
+              <h4 className="text-sm sm:text-base font-black text-white leading-tight flex items-center space-x-1.5 truncate">
+                <span className="truncate">{activeName}</span>
+                {isCustomDesignation && !isFallback && (
+                  <UserCheck className="w-3.5 h-3.5 text-emerald-400 inline shrink-0" />
+                )}
+              </h4>
+
+              {/* Target Role Badge */}
+              <div className="flex items-center flex-wrap gap-1 pt-0.5">
+                <span
+                  className={`inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] sm:text-[11px] font-bold max-w-full truncate ${
+                    isCustomDesignation
+                      ? 'bg-indigo-500/25 text-indigo-200 border border-indigo-400/40'
+                      : 'bg-blue-500/15 text-blue-300 border border-blue-400/30'
+                  }`}
+                >
+                  <span className="truncate">📌 {activeRole}</span>
+                  {isCustomDesignation && targetCallingItem?.targetGrade && (
+                    <span className="text-indigo-300 shrink-0">• {targetCallingItem.targetGrade}</span>
+                  )}
+                </span>
+
+                {isFallback && (
+                  <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded-full text-[9px] sm:text-[10px] font-bold flex items-center space-x-1 shrink-0">
+                    <ShieldAlert className="w-2.5 h-2.5" />
+                    <span>BM (Fallback)</span>
+                  </span>
+                )}
+              </div>
+
+              {/* Branch Name */}
+              <div className="flex items-center space-x-1 text-xs font-bold text-emerald-400 mt-1 truncate">
+                <MapPin className="w-3 h-3 inline text-emerald-400 shrink-0" />
+                <span className="truncate">{manager.branch} Branch</span>
+                {isCustomDesignation && !isFallback && (
+                  <span className="text-[10px] text-slate-400 font-normal shrink-0 truncate">
+                    (BM: {manager.name})
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center space-x-1 text-slate-400 shrink-0">
+              <button
+                onClick={() => onEdit(manager)}
+                className="p-1 hover:text-blue-300 hover:bg-slate-700 rounded-lg transition-colors"
+                title="Edit Manager Details"
+              >
+                <Edit3 className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => onDelete(manager.id)}
+                className="p-1 hover:text-rose-400 hover:bg-slate-700 rounded-lg transition-colors"
+                title="Delete Manager"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          {manager.sinceWhen && (
+            <div className="flex items-center space-x-1 text-[10px] sm:text-[11px] text-slate-400 mt-1 truncate">
+              <Calendar className="w-3 h-3 text-slate-500 shrink-0" />
+              <span className="truncate">Since: {manager.sinceWhen}</span>
+            </div>
+          )}
+
+          {isOnLeave && manager.leaveReason && (
+            <div className="text-[10px] sm:text-[11px] text-amber-300 mt-1 italic truncate">
+              कारण: {manager.leaveReason}
             </div>
           )}
         </div>
-      )}
 
-      {/* Callback Received Action (Point 10 requirement):
-          When staff marked not answered / busy, but branch calls back later,
-          this provides an immediate 1-tap update to mark Connected & clear pending queue */}
-      {outcome && outcome !== 'connected' && (
-        <div className="mt-2.5 pt-2 border-t border-slate-700/60">
+        {/* Phone Number Display for Active Target */}
+        <div className="mt-2.5 py-1.5 sm:py-2 px-2.5 sm:px-3 bg-slate-900/90 rounded-xl flex items-center justify-between border border-slate-700/80 shadow-inner">
+          <div className="min-w-0 pr-2">
+            <span className="text-[9px] sm:text-[10px] text-slate-400 block font-semibold truncate">
+              {isCustomDesignation ? `कॉल: ${activeRole}` : '1st Call (BM)'}
+            </span>
+            <div className="font-mono text-xs sm:text-sm font-black text-amber-300 tracking-wide truncate">
+              +91 {activePhone}
+            </div>
+          </div>
+          <div className="flex items-center space-x-1.5 shrink-0">
+            <button
+              onClick={() => onCallSingle(manager, targetCallingItem)}
+              className="p-2 sm:p-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl shadow-md hover:shadow-emerald-900/50 transition-all active:scale-95"
+              title={`Call ${activeName} (${activeRole})`}
+            >
+              <Phone className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            </button>
+            <button
+              onClick={openWhatsApp}
+              className="p-2 sm:p-2.5 bg-emerald-800/40 hover:bg-emerald-700/60 border border-emerald-600/40 text-emerald-300 rounded-xl transition-colors"
+              title="Message on WhatsApp"
+            >
+              <MessageSquare className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* Point 1, 2, 3 Action Bar - 3 Equal Grid Columns (Never overflows on mobile) */}
+        <div className="mt-2 pt-2 border-t border-slate-700/60 grid grid-cols-3 gap-1 text-xs">
+          {/* Leave button */}
           <button
-            onClick={() => onCallbackReceived(manager.id)}
-            className="w-full py-2 px-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs flex items-center justify-center space-x-1.5 shadow-md shadow-emerald-950/40 transition-all active:scale-[0.98] border border-emerald-400/40"
-            title="शाखा से वापस कॉल आया - तुरंत 'बात हो गई' के रूप में दर्ज करें"
+            onClick={() => onManageLeave(manager)}
+            className={`py-1 px-1 rounded-lg font-semibold flex items-center justify-center space-x-1 text-[10px] sm:text-[11px] transition-colors min-w-0 ${
+              isOnLeave
+                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+            }`}
+            title="छुट्टी / DND सेट करें"
           >
-            <PhoneIncoming className="w-4 h-4 text-emerald-200 animate-pulse" />
-            <span>वापस कॉल आया (बात हो गई ✅)</span>
+            <Palmtree className="w-3 h-3 text-amber-400 shrink-0" />
+            <span className="truncate">{isOnLeave ? 'छुट्टी' : 'छुट्टी/DND'}</span>
+          </button>
+
+          {/* Staff hierarchy button */}
+          <button
+            onClick={() => onManageHierarchy(manager)}
+            className={`py-1 px-1 rounded-lg font-semibold flex items-center justify-center space-x-1 text-[10px] sm:text-[11px] transition-colors min-w-0 ${
+              backupCount > 0
+                ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40'
+                : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+            }`}
+            title="शाखा स्टाफ एवं 2nd Call सेट करें"
+          >
+            <Users className="w-3 h-3 text-indigo-400 shrink-0" />
+            <span className="truncate">स्टाफ ({backupCount})</span>
+          </button>
+
+          {/* Skip Today Toggle */}
+          <button
+            onClick={() => onToggleSkipToday(manager.id)}
+            className={`py-1 px-1 rounded-lg font-semibold flex items-center justify-center space-x-1 text-[10px] sm:text-[11px] transition-colors min-w-0 ${
+              isSkippedToday
+                ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+            }`}
+            title="आज कॉल न करें"
+          >
+            {isSkippedToday ? (
+              <>
+                <Eye className="w-3 h-3 text-emerald-400 shrink-0" />
+                <span className="truncate">शामिल</span>
+              </>
+            ) : (
+              <>
+                <EyeOff className="w-3 h-3 text-slate-400 shrink-0" />
+                <span className="truncate">छोड़ें</span>
+              </>
+            )}
           </button>
         </div>
-      )}
 
-      {/* Quick Mark & Edit Outcome Section */}
-      <div className={`mt-2.5 pt-2 border-t border-slate-700/50 space-y-1.5 ${!outcome || outcome === 'connected' ? '' : 'pt-1.5'}`}>
-        <div className="grid grid-cols-2 gap-2">
+        {/* Call Log Notes or Tags if existing */}
+        {callLog && (callLog.notes || callLog.tags?.length || callLog.timestamp) && (
+          <div className="mt-2 pt-1.5 border-t border-slate-700/60 text-[10px] sm:text-[11px] text-slate-400 space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[9px] text-slate-500 font-mono">
+                Round {callLog.round} •{' '}
+                {new Date(callLog.timestamp).toLocaleTimeString([], {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
+              </span>
+              {callLog.tags?.[0] && (
+                <span className="px-1.5 py-0.2 bg-blue-900/60 text-blue-200 border border-blue-500/30 rounded text-[9px] font-semibold truncate max-w-[120px]">
+                  {callLog.tags[0]}
+                </span>
+              )}
+            </div>
+            {callLog.notes && (
+              <div className="text-slate-300 italic bg-slate-900/50 p-1.5 rounded text-[10px] sm:text-[11px] line-clamp-2">
+                "{callLog.notes}"
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Bottom Sticky Section: Uniform Height across all cards */}
+      <div className="mt-2.5 pt-2 border-t border-slate-700/50 space-y-1.5">
+        {/* Callback Received Action: Immediate 1-tap update */}
+        {outcome && outcome !== 'connected' && (
+          <button
+            onClick={() => onCallbackReceived(manager.id)}
+            className="w-full py-1.5 sm:py-2 px-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-[11px] sm:text-xs flex items-center justify-center space-x-1.5 shadow-md shadow-emerald-950/40 transition-all active:scale-[0.98] border border-emerald-400/40 truncate"
+            title="शाखा से वापस कॉल आया - तुरंत 'बात हो गई' के रूप में दर्ज करें"
+          >
+            <PhoneIncoming className="w-3.5 h-3.5 text-emerald-200 animate-pulse shrink-0" />
+            <span className="truncate">वापस कॉल आया (बात हो गई ✅)</span>
+          </button>
+        )}
+
+        {/* Quick Mark Buttons */}
+        <div className="grid grid-cols-2 gap-1.5">
           <button
             onClick={() => onUpdateStatusQuick(manager.id, 'connected')}
-            className={`py-1.5 px-2 rounded-lg text-xs font-bold flex items-center justify-center space-x-1 transition-all ${
+            className={`py-1.5 px-1.5 rounded-lg text-[11px] sm:text-xs font-bold flex items-center justify-center space-x-1 transition-all min-w-0 ${
               outcome === 'connected'
                 ? 'bg-emerald-600 text-white shadow-md'
                 : 'bg-emerald-950/40 hover:bg-emerald-900/60 border border-emerald-600/30 text-emerald-300'
             }`}
             title="बात हो गई (Mark Connected)"
           >
-            <CheckCircle2 className="w-3.5 h-3.5" />
-            <span>बात हो गई</span>
+            <CheckCircle2 className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
+            <span className="truncate">बात हो गई</span>
           </button>
 
           <button
             onClick={() => onUpdateStatusQuick(manager.id, 'not_answered')}
-            className={`py-1.5 px-2 rounded-lg text-xs font-bold flex items-center justify-center space-x-1 transition-all ${
+            className={`py-1.5 px-1.5 rounded-lg text-[11px] sm:text-xs font-bold flex items-center justify-center space-x-1 transition-all min-w-0 ${
               outcome === 'not_answered'
                 ? 'bg-rose-600 text-white shadow-md'
                 : 'bg-rose-950/40 hover:bg-rose-900/60 border border-rose-600/30 text-rose-300'
             }`}
             title="बात नहीं हुई (Mark Not Answered / Pending)"
           >
-            <XCircle className="w-3.5 h-3.5" />
-            <span>बात नहीं हुई</span>
+            <XCircle className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
+            <span className="truncate">बात नहीं हुई</span>
           </button>
         </div>
 
         {/* Detailed Status & Notes Editor Button */}
         <button
           onClick={() => onOpenEditStatus(manager, targetCallingItem)}
-          className="w-full py-1 px-2 rounded-lg bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/70 text-slate-300 hover:text-white text-[11px] font-semibold flex items-center justify-center space-x-1.5 transition-colors"
+          className="w-full py-1 px-2 rounded-lg bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/70 text-slate-300 hover:text-white text-[10px] sm:text-[11px] font-semibold flex items-center justify-center space-x-1 transition-colors min-w-0"
           title="कॉल स्थिति बदलें, नोट लिखें, या रीसेट करें"
         >
-          <Edit3 className="w-3 h-3 text-blue-400" />
-          <span>स्थिति / नोट बदलें (Edit Status & Notes)</span>
+          <Edit3 className="w-3 h-3 text-blue-400 shrink-0" />
+          <span className="truncate">स्थिति / नोट बदलें (Edit Status)</span>
         </button>
       </div>
     </div>
   );
 };
+

@@ -14,6 +14,7 @@ export const RegionalStaffModal: React.FC<RegionalStaffModalProps> = ({
   onQuickCall,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
+  const [areaCategoryFilter, setAreaCategoryFilter] = useState<'ALL' | 'RURAL' | 'SEMI-URBAN' | 'URBAN' | 'RO'>('ALL');
   const [positionFilter, setPositionFilter] = useState('ALL');
   const [cadreFilter, setCadreFilter] = useState('ALL');
 
@@ -42,10 +43,11 @@ export const RegionalStaffModal: React.FC<RegionalStaffModalProps> = ({
 
       if (positionFilter !== 'ALL' && staff.position !== positionFilter) return false;
       if (cadreFilter !== 'ALL' && staff.cadre !== cadreFilter) return false;
+      if (areaCategoryFilter !== 'ALL' && staff.category !== areaCategoryFilter) return false;
 
       return true;
     });
-  }, [searchQuery, positionFilter, cadreFilter]);
+  }, [searchQuery, positionFilter, cadreFilter, areaCategoryFilter]);
 
   const openWhatsApp = (staff: RegionalEmployee) => {
     const cleanNumber = staff.phone.replace(/[^0-9]/g, '');
@@ -75,7 +77,7 @@ export const RegionalStaffModal: React.FC<RegionalStaffModalProps> = ({
                 </span>
               </div>
               <p className="text-xs text-blue-200">
-                बैंक ऑफ़ बड़ौदा भावनगर क्षेत्र के सभी अधिकारियों एवं कर्मचारियों की सूची
+                बैंक ऑफ़ बड़ौदा भावनगर क्षेत्र के सभी अधिकारियों एवं कर्मचारियों की सूची (RO स्टाफ ऑटो-ब्लॉक)
               </p>
             </div>
           </div>
@@ -89,7 +91,7 @@ export const RegionalStaffModal: React.FC<RegionalStaffModalProps> = ({
 
         {/* Filter & Search Bar */}
         <div className="p-4 bg-slate-950/80 border-b border-slate-800 space-y-3">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
             {/* Search Input */}
             <div className="relative sm:col-span-1">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -97,9 +99,24 @@ export const RegionalStaffModal: React.FC<RegionalStaffModalProps> = ({
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search by name, branch, phone, EC..."
+                placeholder="Search name, branch, phone..."
                 className="w-full pl-9 pr-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
               />
+            </div>
+
+            {/* Area Category Filter */}
+            <div>
+              <select
+                value={areaCategoryFilter}
+                onChange={(e) => setAreaCategoryFilter(e.target.value as any)}
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-amber-300 font-semibold focus:outline-none focus:border-blue-500"
+              >
+                <option value="ALL">🌐 सभी क्षेत्र (All Categories)</option>
+                <option value="RURAL">🌾 ग्रामीण (Rural - 131)</option>
+                <option value="SEMI-URBAN">🏘️ अर्ध-शहरी (Semi-Urban - 136)</option>
+                <option value="URBAN">🏙️ शहरी (Urban - 133)</option>
+                <option value="RO">🚫 RO स्टाफ (Regional Office - 60)</option>
+              </select>
             </div>
 
             {/* Position Filter */}
@@ -135,12 +152,13 @@ export const RegionalStaffModal: React.FC<RegionalStaffModalProps> = ({
 
           <div className="text-xs text-slate-400 flex items-center justify-between">
             <span>दिखाए जा रहे हैं: <strong className="text-white">{filteredStaff.length}</strong> कर्मचारी</span>
-            {(searchQuery || positionFilter !== 'ALL' || cadreFilter !== 'ALL') && (
+            {(searchQuery || positionFilter !== 'ALL' || cadreFilter !== 'ALL' || areaCategoryFilter !== 'ALL') && (
               <button
                 onClick={() => {
                   setSearchQuery('');
                   setPositionFilter('ALL');
                   setCadreFilter('ALL');
+                  setAreaCategoryFilter('ALL');
                 }}
                 className="text-blue-400 hover:underline"
               >
@@ -158,54 +176,85 @@ export const RegionalStaffModal: React.FC<RegionalStaffModalProps> = ({
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-              {filteredStaff.map((staff) => (
-                <div
-                  key={staff.id}
-                  className="bg-slate-800/80 border border-slate-700/80 rounded-xl p-3 flex items-start justify-between hover:border-slate-600 transition-colors"
-                >
-                  <div className="space-y-1">
-                    <div className="flex items-center space-x-1.5 flex-wrap">
-                      <span className="font-bold text-white text-sm">{staff.name}</span>
-                      <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-blue-500/20 text-blue-300 border border-blue-500/30">
-                        EC: {staff.ecNo}
-                      </span>
-                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-700 text-slate-300">
-                        {staff.grade}
-                      </span>
+              {filteredStaff.map((staff) => {
+                const isRO = staff.isROStaff || staff.category === 'RO' || staff.solId === '6106';
+                return (
+                  <div
+                    key={staff.id}
+                    className={`border rounded-xl p-3 flex items-start justify-between transition-colors ${
+                      isRO
+                        ? 'bg-red-950/20 border-red-800/40 hover:border-red-700/60'
+                        : 'bg-slate-800/80 border-slate-700/80 hover:border-slate-600'
+                    }`}
+                  >
+                    <div className="space-y-1">
+                      <div className="flex items-center space-x-1.5 flex-wrap">
+                        <span className="font-bold text-white text-sm">{staff.name}</span>
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                          EC: {staff.ecNo}
+                        </span>
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-700 text-slate-300">
+                          {staff.grade}
+                        </span>
+                        {isRO ? (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40">
+                            🚫 RO स्टाफ (कॉलिंग ब्लॉक)
+                          </span>
+                        ) : (
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                            staff.category === 'RURAL'
+                              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                              : staff.category === 'SEMI-URBAN'
+                              ? 'bg-teal-500/20 text-teal-300 border border-teal-500/30'
+                              : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                          }`}>
+                            {staff.category === 'RURAL' ? '🌾 Rural' : staff.category === 'SEMI-URBAN' ? '🏘️ Semi-Urban' : '🏙️ Urban'}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="text-xs font-semibold text-emerald-400 flex items-center space-x-1">
+                        <Building2 className="w-3.5 h-3.5 inline shrink-0" />
+                        <span>{staff.branch} (SOL: {staff.solId})</span>
+                      </div>
+
+                      <div className="text-[11px] text-indigo-300 font-medium">
+                        📌 {staff.position} ({staff.cadre})
+                      </div>
+
+                      <div className="text-xs font-mono font-bold text-amber-300 pt-0.5">
+                        📞 +91 {staff.phone}
+                      </div>
                     </div>
 
-                    <div className="text-xs font-semibold text-emerald-400 flex items-center space-x-1">
-                      <Building2 className="w-3.5 h-3.5 inline shrink-0" />
-                      <span>{staff.branch}</span>
-                    </div>
-
-                    <div className="text-[11px] text-indigo-300 font-medium">
-                      📌 {staff.position} ({staff.cadre})
-                    </div>
-
-                    <div className="text-xs font-mono font-bold text-amber-300 pt-0.5">
-                      📞 +91 {staff.phone}
+                    <div className="flex items-center space-x-1.5 ml-2 shrink-0">
+                      {isRO ? (
+                        <div
+                          title="RO स्टाफ कॉलिंग पाइपलाइन से हमेशा ब्लॉक है"
+                          className="px-2.5 py-1.5 bg-rose-950/60 border border-rose-800/40 text-rose-400 rounded-lg text-[10px] font-bold text-center cursor-not-allowed"
+                        >
+                          कॉल ब्लॉक
+                        </div>
+                      ) : (
+                        <a
+                          href={`tel:${staff.phone}`}
+                          className="p-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg shadow-sm"
+                          title="Call"
+                        >
+                          <Phone className="w-4 h-4" />
+                        </a>
+                      )}
+                      <button
+                        onClick={() => openWhatsApp(staff)}
+                        className="p-2 bg-emerald-800/40 hover:bg-emerald-700/60 border border-emerald-600/40 text-emerald-300 rounded-lg"
+                        title="WhatsApp"
+                      >
+                        <MessageSquare className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
-
-                  <div className="flex items-center space-x-1.5 ml-2 shrink-0">
-                    <a
-                      href={`tel:${staff.phone}`}
-                      className="p-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg shadow-sm"
-                      title="Call"
-                    >
-                      <Phone className="w-4 h-4" />
-                    </a>
-                    <button
-                      onClick={() => openWhatsApp(staff)}
-                      className="p-2 bg-emerald-800/40 hover:bg-emerald-700/60 border border-emerald-600/40 text-emerald-300 rounded-lg"
-                      title="WhatsApp"
-                    >
-                      <MessageSquare className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
