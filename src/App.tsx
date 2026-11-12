@@ -42,6 +42,8 @@ import {
   getTodayKey,
   isManagerOnLeave,
   isManagerSkippedToday,
+  purgeAllOldData,
+  ensureDataUpdatedAndPurgeOld,
 } from './utils/storage';
 import { INITIAL_BRANCH_MANAGERS } from './data/defaultManagers';
 import { AutoDialerModal } from './components/AutoDialerModal';
@@ -479,6 +481,16 @@ export default function App() {
     handleResetSession();
   };
 
+  // User request: Delete old data and reload fresh 02.11.2026 data
+  const handlePurgeAllOldData = () => {
+    purgeAllOldData();
+    const freshManagers = loadManagers();
+    setManagers(freshManagers);
+    const freshSession = loadTodaySession();
+    setSession(freshSession);
+    showToast('🗑️ पुराना सारा डेटा डिलीट कर दिया गया! 02.11.2026 की नई लिस्ट ताज़ा लोड हुई।');
+  };
+
   // Filtered managers for list/table view - also matches against selected designated target officers
   const filteredManagers = useMemo(() => {
     return managers.filter((m) => {
@@ -654,8 +666,16 @@ export default function App() {
                   <span>•</span>
                   <span>{scopedManagers.length} {areaCategoryFilter !== 'ALL' ? `${areaCategoryFilter} ` : ''}शाखाएं (Total: 59)</span>
                   <span>•</span>
-                  <span>460 Regional Staff (RO ब्लॉक)</span>
+                  <span className="text-emerald-300 font-bold">✓ 460 स्टाफ (02.11.2026 नई लिस्ट)</span>
                 </div>
+                <button
+                  onClick={handlePurgeAllOldData}
+                  className="inline-flex items-center space-x-1.5 px-3 py-1 bg-rose-500/20 hover:bg-rose-500/30 border border-rose-400/40 text-rose-300 rounded-full text-xs font-bold transition-colors cursor-pointer active:scale-95"
+                  title="पुराना सारा डेटा (कॉल लॉग्स आदि) डिलीट करें"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>पुराना डेटा डिलीट करें (Fresh Data)</span>
+                </button>
                 <button
                   onClick={() => setIsShareOpen(true)}
                   className="inline-flex items-center space-x-1.5 px-3 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/40 text-emerald-300 rounded-full text-xs font-bold transition-colors cursor-pointer"
@@ -1364,6 +1384,7 @@ export default function App() {
         }}
         onResetSession={handleResetSession}
         onResetToDefaultManagers={handleResetToDefault}
+        onPurgeAllOldData={handlePurgeAllOldData}
       />
 
       {/* Point 1: Leave & DND Modal */}

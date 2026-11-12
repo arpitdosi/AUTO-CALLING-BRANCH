@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Settings, RotateCcw, Volume2, Smartphone, Clock, MessageSquare, AlertCircle } from 'lucide-react';
+import { X, Settings, RotateCcw, Volume2, Smartphone, Clock, MessageSquare, AlertCircle, Trash2 } from 'lucide-react';
 import { DialingSettings } from '../types';
 
 interface SettingsModalProps {
@@ -9,6 +9,7 @@ interface SettingsModalProps {
   onSaveSettings: (settings: DialingSettings) => void;
   onResetSession: () => void;
   onResetToDefaultManagers: () => void;
+  onPurgeAllOldData?: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -18,6 +19,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onSaveSettings,
   onResetSession,
   onResetToDefaultManagers,
+  onPurgeAllOldData,
 }) => {
   const [localSettings, setLocalSettings] = useState<DialingSettings>(settings);
 
@@ -185,6 +187,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           {/* Danger Zone: Resets */}
           <div className="pt-3 border-t border-slate-800 space-y-2">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Reset Actions</span>
+            
+            {/* Primary User Request: Purge old data and reload fresh 02.11.2026 data */}
+            {onPurgeAllOldData && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (confirm('क्या आप पुराना सारा डेटा (कॉल लॉग्स, पिछली हिस्ट्री आदि) डिलीट करके 02.11.2026 की नई लिस्ट को ताज़ा लोड करना चाहते हैं?')) {
+                    onPurgeAllOldData();
+                    onClose();
+                  }
+                }}
+                className="w-full p-3 bg-gradient-to-r from-rose-900 to-red-800 hover:from-rose-800 hover:to-red-700 border border-rose-500/50 rounded-xl text-xs font-bold text-white flex items-center justify-center space-x-2 shadow-lg shadow-rose-950/50 transition-all active:scale-95 cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4 text-rose-200" />
+                <span>🗑️ पुराना सारा डेटा डिलीट करें एवं नई लिस्ट लोड करें (Fresh 02.11.2026 Data)</span>
+              </button>
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <button
                 type="button"

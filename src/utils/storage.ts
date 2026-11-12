@@ -1,9 +1,11 @@
 import { BranchManager, CallLogEntry, CallOutcome, DailySession, DialingSettings } from '../types';
 import { INITIAL_BRANCH_MANAGERS } from '../data/defaultManagers';
 
-const MANAGERS_STORAGE_KEY = 'bank_bm_managers_v2';
+const MANAGERS_STORAGE_KEY = 'bank_bm_managers_v3';
 const SESSION_PREFIX = 'bank_bm_daily_session_';
 const SETTINGS_KEY = 'bank_bm_settings_v1';
+export const DATA_VERSION_KEY = 'bob_data_version';
+export const CURRENT_DATA_VERSION = 'v_02_11_2026';
 
 export const DEFAULT_SETTINGS: DialingSettings = {
   autoOpenDialer: true,
@@ -45,7 +47,45 @@ export function calculateDateAfterDays(days: number): string {
   return `${year}-${month}-${day}`;
 }
 
+export function purgeAllOldData(): void {
+  try {
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (
+        key &&
+        (key.startsWith('bank_bm_') ||
+          key.startsWith('bob_') ||
+          key.includes('daily_session') ||
+          key === 'bank_bm_managers_v1' ||
+          key === 'bank_bm_managers_v2')
+      ) {
+        keysToRemove.push(key);
+      }
+    }
+    keysToRemove.forEach((k) => localStorage.removeItem(k));
+    localStorage.setItem(DATA_VERSION_KEY, CURRENT_DATA_VERSION);
+    localStorage.setItem(MANAGERS_STORAGE_KEY, JSON.stringify(INITIAL_BRANCH_MANAGERS));
+  } catch (err) {
+    console.error('Failed purging old data', err);
+  }
+}
+
+export function ensureDataUpdatedAndPurgeOld(): boolean {
+  try {
+    const existingVersion = localStorage.getItem(DATA_VERSION_KEY);
+    if (existingVersion !== CURRENT_DATA_VERSION) {
+      purgeAllOldData();
+      return true;
+    }
+  } catch (err) {
+    console.error('Failed running data auto-purge', err);
+  }
+  return false;
+}
+
 export function loadManagers(): BranchManager[] {
+  ensureDataUpdatedAndPurgeOld();
   try {
     const raw = localStorage.getItem(MANAGERS_STORAGE_KEY);
     if (raw) {
