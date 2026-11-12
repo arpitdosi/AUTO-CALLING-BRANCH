@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Phone,
   PhoneOff,
@@ -24,7 +24,8 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { CallOutcome, CallLogEntry, DialingSettings, StaffContact } from '../types';
-import { CampaignCallingItem } from '../utils/staffMatcher';
+import { CampaignCallingItem, getStaffForBranch } from '../utils/staffMatcher';
+import { RegionalEmployee } from '../data/bhavnagarStaff';
 import { playAudioFeedback } from '../utils/storage';
 import { backgroundManager } from '../utils/backgroundManager';
 
@@ -67,7 +68,12 @@ export const AutoDialerModal: React.FC<AutoDialerModalProps> = ({
   const [nextCallCountdown, setNextCallCountdown] = useState<number | null>(null);
   const [isPaused, setIsPaused] = useState(false);
   const [isFinished, setIsFinished] = useState(false);
-  const [activeEscalation, setActiveEscalation] = useState<StaffContact | null>(null);
+
+  // Branch Staff Escalation State (User Requirement)
+  const [activeEscalation, setActiveEscalation] = useState<RegionalEmployee | null>(null);
+  const [hasAttemptedBackup, setHasAttemptedBackup] = useState<boolean>(false);
+  const [showingBranchStaffPicker, setShowingBranchStaffPicker] = useState<boolean>(false);
+  const [initialFailedOutcome, setInitialFailedOutcome] = useState<CallOutcome | null>(null);
 
   // Hands-Free Auto-Dialing State
   const [handsFreeEnabled, setHandsFreeEnabled] = useState(settings.handsFreeAutoDial ?? true);
@@ -102,7 +108,21 @@ export const AutoDialerModal: React.FC<AutoDialerModalProps> = ({
     'Satisfactory',
   ];
 
-  // ALL FUNCTIONS DEFINED BEFORE HOOKS TO ENSURE PROPER INITIALIZATION & SCOPE
+  // Retrieve all other available staff members for this branch (excluding current dialed officer and RO staff)
+  const availableBranchStaff = useMemo(() => {
+    if (!currentManager) return [];
+    const allStaff = getStaffForBranch(currentManager.branch);
+
+    const currentPhone = (activeEscalation ? activeEscalation.phone : currentManager.targetPhone).replace(/[^0-9]/g, '');
+    const currentName = (activeEscalation ? activeEscalation.name : currentManager.targetName).trim().toLowerCase();
+
+    return allStaff.filter((s) => {
+      const staffPhone = (s.phone || '').replace(/[^0-9]/g, '');
+      if (staffPhone && staffPhone === currentPhone) return false;
+      if (s.name && s.name.trim().toLowerCase() === currentName) return false;
+      return true;
+    });
+  }, [currentManager, activeEscalation]);
 
   const triggerPhoneCall = (phoneNumber: string) => {
     if (prepTimerRef.current) {
@@ -178,6 +198,9 @@ export const AutoDialerModal: React.FC<AutoDialerModalProps> = ({
     setIsDialed(false);
     setCallCutDetected(false);
     setActiveEscalation(null);
+    setHasAttemptedBackup(false);
+    setShowingBranchStaffPicker(false);
+    setInitialFailedOutcome(null);
     hasNavigatedToDialer.current = false;
     callDialedTimestamp.current = null;
 
@@ -212,53 +235,32 @@ export const AutoDialerModal: React.FC<AutoDialerModalProps> = ({
     }
   };
 
-  const handleOutcome = (outcome: CallOutcome, isBackupCall = false) => {
-    if (!currentManager) return;
-
+  // User selects an alternate staff member from the branch staff list
+  const handleSelectBackupStaff = (staff: RegionalEmployee) => {
+    setActiveEscalation(staff);
+    setHasAttemptedBackup(true);
+    setShowingBranchStaffPicker(false);
+    setIsDialed(false);
+    setCallDuration(0);
+    setCallCutDetected(false);
     hasNavigatedToDialer.current = false;
+    callDialedTimestamp.current = null;
 
-    if (
-      (outcome === 'not_answered' || outcome === 'busy' || outcome === 'switched_off') &&
-      !isBackupCall &&
-      !activeEscalation &&
-      settings.autoEscalateToBackup
-    ) {
-      if (currentManager.alternativeStaff && currentManager.alternativeStaff.length > 0) {
-        const alt = currentManager.alternativeStaff[0];
-        setActiveEscalation({
-          id: alt.id,
-          name: alt.name,
-          designation: `${alt.position} (2nd Officer)`,
-          phone: alt.phone,
-          priorityOrder: 2,
-        });
-
-        if (handsFreeEnabled) {
-          startPrepCountdown(alt.phone);
-        }
-        return;
-      }
+    // Immediately start dialing the chosen 2nd officer
+    if (handsFreeEnabled && !isPaused) {
+      startPrepCountdown(staff.phone);
+    } else {
+      triggerPhoneCall(staff.phone);
     }
+  };
 
-    if (settings.soundEffects) {
-      if (outcome === 'connected') {
-        playAudioFeedback('success');
-      } else {
-        playAudioFeedback('pending');
-      }
-    }
-
-    if (navigator.vibrate && settings.vibrate) {
-      navigator.vibrate(outcome === 'connected' ? [100, 50, 100] : [200]);
-    }
-
+  // User decides not to call backup staff and skips to next branch
+  const handleSkipToNextBranch = () => {
+    if (!currentManager) return;
+    setShowingBranchStaffPicker(false);
+    const outcome = initialFailedOutcome || 'not_answered';
     const tagsToSave = selectedTag ? [selectedTag] : [];
-    const notePrefix =
-      isBackupCall && activeEscalation
-        ? `[2nd Call: ${activeEscalation.name} (${activeEscalation.designation})] `
-        : '';
-    const contactedPerson =
-      isBackupCall && activeEscalation ? activeEscalation.name : currentManager.targetName;
+    const notePrefix = `[1st Call Unanswered: ${currentManager.targetName} (Alternate Staff Skipped)] `;
 
     onRecordCall(
       currentManager.branchId,
@@ -266,13 +268,123 @@ export const AutoDialerModal: React.FC<AutoDialerModalProps> = ({
       notePrefix + notes.trim(),
       callDuration,
       tagsToSave,
-      contactedPerson
+      currentManager.targetName
     );
 
     if (settings.autoNextDelaySeconds > 0 && currentIndex < queue.length - 1) {
       setNextCallCountdown(settings.autoNextDelaySeconds);
     } else {
       proceedToNext();
+    }
+  };
+
+  const handleOutcome = (outcome: CallOutcome) => {
+    if (!currentManager) return;
+
+    hasNavigatedToDialer.current = false;
+
+    // Case 1: Call Connected (बात हो गई)
+    if (outcome === 'connected') {
+      if (settings.soundEffects) {
+        playAudioFeedback('success');
+      }
+      if (navigator.vibrate && settings.vibrate) {
+        navigator.vibrate([100, 50, 100]);
+      }
+
+      const tagsToSave = selectedTag ? [selectedTag] : [];
+      const notePrefix = activeEscalation
+        ? `[2nd Call Connected: ${activeEscalation.name} (${activeEscalation.position})] `
+        : '';
+      const contactedPerson = activeEscalation ? activeEscalation.name : currentManager.targetName;
+
+      onRecordCall(
+        currentManager.branchId,
+        'connected',
+        notePrefix + notes.trim(),
+        callDuration,
+        tagsToSave,
+        contactedPerson
+      );
+
+      if (settings.autoNextDelaySeconds > 0 && currentIndex < queue.length - 1) {
+        setNextCallCountdown(settings.autoNextDelaySeconds);
+      } else {
+        proceedToNext();
+      }
+      return;
+    }
+
+    // Case 2: 2nd Attempt Failed
+    // User Requirement: "agar second time bhi mene baat nahi hui par click kra to next branch par switch karna"
+    if (activeEscalation || hasAttemptedBackup) {
+      if (settings.soundEffects) {
+        playAudioFeedback('pending');
+      }
+      if (navigator.vibrate && settings.vibrate) {
+        navigator.vibrate([200]);
+      }
+
+      const tagsToSave = selectedTag ? [selectedTag] : [];
+      const notePrefix = `[1st & 2nd Call Failed: ${currentManager.targetName} & ${activeEscalation?.name || 'Staff'}] `;
+      const contactedPerson = `${currentManager.targetName} / ${activeEscalation?.name || 'Alternate'}`;
+
+      onRecordCall(
+        currentManager.branchId,
+        outcome,
+        notePrefix + notes.trim(),
+        callDuration,
+        tagsToSave,
+        contactedPerson
+      );
+
+      if (settings.autoNextDelaySeconds > 0 && currentIndex < queue.length - 1) {
+        setNextCallCountdown(settings.autoNextDelaySeconds);
+      } else {
+        proceedToNext();
+      }
+      return;
+    }
+
+    // Case 3: 1st Attempt Failed
+    // User Requirement: "jab me kisi ko call krne ke baad baat nahi hui par click Karu to turant screen par uss branch ke baki sare staff ki details aa jaye or usme se me kisi ko bhi select krke phir se call kar saku"
+    if (availableBranchStaff.length > 0) {
+      if (settings.soundEffects) {
+        playAudioFeedback('pending');
+      }
+      if (navigator.vibrate && settings.vibrate) {
+        navigator.vibrate([150]);
+      }
+      setInitialFailedOutcome(outcome);
+      setShowingBranchStaffPicker(true);
+      if (countdownRef.current) {
+        clearInterval(countdownRef.current);
+        countdownRef.current = null;
+      }
+      setNextCallCountdown(null);
+    } else {
+      // No alternate staff in this branch: proceed to next branch directly
+      if (settings.soundEffects) {
+        playAudioFeedback('pending');
+      }
+      if (navigator.vibrate && settings.vibrate) {
+        navigator.vibrate([200]);
+      }
+      const tagsToSave = selectedTag ? [selectedTag] : [];
+      onRecordCall(
+        currentManager.branchId,
+        outcome,
+        notes.trim(),
+        callDuration,
+        tagsToSave,
+        currentManager.targetName
+      );
+
+      if (settings.autoNextDelaySeconds > 0 && currentIndex < queue.length - 1) {
+        setNextCallCountdown(settings.autoNextDelaySeconds);
+      } else {
+        proceedToNext();
+      }
     }
   };
 
@@ -737,215 +849,338 @@ export const AutoDialerModal: React.FC<AutoDialerModalProps> = ({
               </div>
             )}
 
-            {/* Current Officer / Branch Information Card */}
-            <div
-              className={`bg-slate-800/95 border rounded-3xl p-4 sm:p-5 text-center relative shadow-inner transition-all ${
-                isPaused ? 'opacity-50 border-slate-700' : 'border-slate-700/80'
-              }`}
-            >
-              <div className="inline-flex items-center justify-center px-3 py-1 bg-blue-500/10 border border-blue-500/30 text-blue-300 rounded-full text-xs font-semibold tracking-wide mb-2 flex-wrap gap-1">
-                <span>SOL ID: <strong className="ml-1 text-white">{currentManager.solId}</strong> • Branch Alpha: {currentManager.branchAlpha}</span>
-                {currentManager.areaCategory && (
-                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                    currentManager.areaCategory === 'RURAL'
-                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                      : currentManager.areaCategory === 'SEMI-URBAN'
-                      ? 'bg-teal-500/20 text-teal-300 border border-teal-500/40'
-                      : 'bg-blue-500/20 text-blue-300 border border-blue-500/40'
-                  }`}>
-                    {currentManager.areaCategory === 'RURAL' ? '🌾 Rural' : currentManager.areaCategory === 'SEMI-URBAN' ? '🏘️ Semi-Urban' : '🏙️ Urban'}
-                  </span>
-                )}
-              </div>
-
-              <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
-                {currentManager.targetName}
-              </h2>
-              <div className="text-sm font-bold text-emerald-400 mt-0.5">
-                📍 {currentManager.branchName} Branch
-              </div>
-
-              {/* Target Position Badge */}
-              <div className="inline-flex items-center space-x-1.5 px-3.5 py-1 bg-indigo-500/20 border border-indigo-400/30 text-indigo-200 rounded-full text-xs font-bold mt-2">
-                <span>📌 {currentManager.targetPosition}</span>
-                {currentManager.targetGrade && <span>• {currentManager.targetGrade}</span>}
-              </div>
-
-              {/* Fallback to Branch Head Notice */}
-              {currentManager.isFallbackToBM && (
-                <div className="mt-2.5 mx-auto max-w-md px-3.5 py-1.5 bg-amber-500/20 border border-amber-500/50 text-amber-200 rounded-xl text-xs font-bold">
-                  ⚡ ऑटो फॉलबैक: इस शाखा में यह पद नहीं है, इसलिए शाखा प्रबंधक (BM) को कॉल किया जा रहा है
+            {/* User Requirement: When "बात नहीं हुई" is clicked, show other staff of this branch to pick from */}
+            {showingBranchStaffPicker ? (
+              <div className="bg-slate-900 border-2 border-amber-500 rounded-3xl p-4 sm:p-5 space-y-4 shadow-2xl animate-fade-in text-white">
+                {/* Alert Header */}
+                <div className="bg-gradient-to-r from-amber-950/90 via-rose-950/80 to-amber-950/90 border border-amber-500/50 rounded-2xl p-3.5 flex items-start space-x-3">
+                  <div className="w-10 h-10 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center font-black text-xl shrink-0">
+                    ⚠️
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[11px] uppercase font-extrabold tracking-wider text-amber-300">
+                      पहला प्रयास: बात नहीं हुई (Call Unanswered)
+                    </div>
+                    <div className="text-sm sm:text-base font-black text-white mt-0.5 truncate">
+                      {currentManager.targetName} ({currentManager.targetPosition})
+                    </div>
+                    <div className="text-xs text-amber-200/90 mt-1">
+                      नीचे <strong>{currentManager.branchName}</strong> शाखा के अन्य स्टाफ की सूची है। किसी को भी चुनकर तुरंत कॉल करें:
+                    </div>
+                  </div>
                 </div>
-              )}
 
-              {/* Alternative Staff Available Notice */}
-              {currentManager.alternativeStaff && currentManager.alternativeStaff.length > 0 && (
-                <div className="mt-2 text-xs text-indigo-300 flex items-center justify-center space-x-1">
-                  <Users className="w-3.5 h-3.5" />
-                  <span>
-                    इस शाखा में इस पद के +{currentManager.alternativeStaff.length} अन्य अधिकारी भी उपलब्ध हैं
+                {/* Section Header */}
+                <div className="flex items-center justify-between text-xs px-1">
+                  <span className="font-bold text-white flex items-center space-x-1.5">
+                    <Users className="w-4 h-4 text-indigo-400" />
+                    <span>शाखा के अन्य उपलब्ध स्टाफ सदस्य ({availableBranchStaff.length}):</span>
+                  </span>
+                  <span className="text-slate-400 text-[11px]">
+                    (SOL: {currentManager.solId})
                   </span>
                 </div>
-              )}
 
-              {/* Active Escalation Display if calling 2nd officer */}
-              {activeEscalation && (
-                <div className="mt-3 p-3 bg-amber-950/80 border-2 border-amber-500 rounded-2xl text-left space-y-1">
-                  <div className="text-xs font-black text-amber-300 flex items-center space-x-1.5">
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    <span>2nd Officer कॉल (अल्टरनेटिव स्टाफ):</span>
-                  </div>
-                  <div className="text-sm font-bold text-white">
-                    {activeEscalation.name} — <span className="text-amber-200 text-xs">{activeEscalation.designation}</span>
-                  </div>
-                  <div className="text-xs text-amber-300 font-mono">+91 {activeEscalation.phone}</div>
+                {/* Staff List */}
+                <div className="max-h-[46vh] overflow-y-auto space-y-2 pr-1 -mr-1">
+                  {availableBranchStaff.map((staff: RegionalEmployee) => (
+                    <div
+                      key={staff.id || staff.ecNo}
+                      className="bg-slate-800/90 hover:bg-slate-800 border border-slate-700 hover:border-emerald-500/60 rounded-2xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 transition-all shadow-md"
+                    >
+                      <div className="space-y-0.5 min-w-0">
+                        <div className="flex items-center space-x-2 flex-wrap">
+                          <span className="font-bold text-white text-sm">
+                            {staff.name}
+                          </span>
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                            EC: {staff.ecNo}
+                          </span>
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-700 text-slate-300">
+                            {staff.grade}
+                          </span>
+                        </div>
+
+                        <div className="text-xs font-semibold text-emerald-300 flex items-center space-x-1">
+                          <span>📌 {staff.position}</span>
+                          <span className="text-slate-500">•</span>
+                          <span className="text-slate-400">{staff.cadre}</span>
+                        </div>
+
+                        <div className="text-xs font-mono font-bold text-amber-300">
+                          📞 +91 {staff.phone}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center space-x-2 shrink-0">
+                        <button
+                          onClick={() => handleSelectBackupStaff(staff)}
+                          className="w-full sm:w-auto px-4 py-2 bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-400 hover:to-green-500 text-slate-950 font-black rounded-xl text-xs flex items-center justify-center space-x-1.5 shadow-lg shadow-emerald-950/60 transition-transform active:scale-95"
+                        >
+                          <Phone className="w-3.5 h-3.5 fill-current" />
+                          <span>कॉल करें (Call)</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              )}
 
-              {/* Phone Dial Section */}
-              <div className="mt-4 pt-4 border-t border-slate-700/80 flex flex-col items-center">
-                {currentManager.isOnLeave && (
-                  <div className="mb-3 px-3 py-1 bg-amber-950/80 border border-amber-500/50 rounded-xl text-amber-300 text-xs font-bold">
-                    🏖️ यह अधिकारी वर्तमान में छुट्टी पर हैं
+                {/* Bottom Action Footer */}
+                <div className="pt-2 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-2.5">
+                  <div className="text-[11px] text-slate-400 text-center sm:text-left">
+                    ⚡ नोट: 2nd कॉल में भी बात नहीं होने पर सिस्टम <strong>स्वतः अगली शाखा पर स्विच</strong> करेगा।
                   </div>
-                )}
-
-                <div className="text-2xl sm:text-3xl font-mono font-black tracking-wider text-amber-300">
-                  +91 {activeEscalation ? activeEscalation.phone : currentManager.targetPhone}
-                </div>
-
-                {isDialed && (
-                  <div className="mt-2 inline-flex items-center space-x-2 px-3 py-1 bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 rounded-full text-xs font-bold">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
-                    <span>कॉल समय (Call Duration): {formatTimer(callDuration)}</span>
-                  </div>
-                )}
-
-                <div className="mt-3 flex items-center space-x-3">
                   <button
-                    onClick={() =>
-                      triggerPhoneCall(
-                        activeEscalation ? activeEscalation.phone : currentManager.targetPhone
-                      )
-                    }
-                    className="px-6 py-2.5 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white font-black rounded-2xl shadow-xl shadow-emerald-950/50 flex items-center space-x-2 transition-transform active:scale-95"
+                    onClick={handleSkipToNextBranch}
+                    className="w-full sm:w-auto px-4 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 font-bold rounded-xl text-xs flex items-center justify-center space-x-2 transition-colors active:scale-95"
                   >
-                    <Phone className="w-5 h-5" />
-                    <span>{isDialed ? 'फिर से डायल करें (Re-dial)' : 'अभी डायल करें (Dial Now)'}</span>
-                  </button>
-
-                  <button
-                    onClick={openWhatsApp}
-                    className="p-2.5 bg-emerald-800/40 hover:bg-emerald-700/60 border border-emerald-600/40 text-emerald-300 rounded-2xl transition-colors"
-                    title="Send WhatsApp Follow-up message"
-                  >
-                    <MessageSquare className="w-5 h-5" />
+                    <SkipForward className="w-4 h-4 text-slate-400" />
+                    <span>अगली शाखा पर जाएं (Skip to Next Branch)</span>
                   </button>
                 </div>
               </div>
-            </div>
-
-            {/* Prominent Pause / Break Button */}
-            <div className="pt-0.5">
-              <button
-                onClick={() => setIsPaused(!isPaused)}
-                className={`w-full py-3 px-4 rounded-2xl font-black text-xs sm:text-sm flex items-center justify-center space-x-2.5 shadow-lg transition-all active:scale-95 ${
-                  isPaused
-                    ? 'bg-gradient-to-r from-emerald-500 to-green-500 text-slate-950 ring-4 ring-emerald-500/30'
-                    : 'bg-gradient-to-r from-amber-500 via-amber-600 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-slate-950 ring-4 ring-amber-500/20'
-                }`}
-              >
-                {isPaused ? <Play className="w-4 h-4 fill-current" /> : <Pause className="w-4 h-4 fill-current" />}
-                <span>
-                  {isPaused
-                    ? '▶️ कॉलिंग फिर से शुरू करें (RESUME CALLING)'
-                    : '⏸️ थोड़ी देर के लिए रोकें / ब्रेक लें (PAUSE CALLING)'}
-                </span>
-              </button>
-            </div>
-
-            {/* Calling Outcome Decision Area */}
-            <div className="space-y-3 pt-1">
-              <div className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center justify-between">
-                <span>कॉल परिणाम चुनें (Call Outcome)</span>
-                <span className="text-slate-400 text-[11px] font-normal">
-                  (सही विकल्प पर क्लिक करें)
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {/* 1. Baat Ho Gayi Button */}
-                <button
-                  onClick={() => handleOutcome('connected', Boolean(activeEscalation))}
-                  className="group relative p-4 bg-gradient-to-br from-emerald-900/80 via-emerald-800/90 to-emerald-900 border-2 border-emerald-400 hover:border-emerald-300 rounded-2xl text-left shadow-xl transition-all active:scale-[0.98]"
+            ) : (
+              <>
+                {/* Current Officer / Branch Information Card */}
+                <div
+                  className={`bg-slate-800/95 border rounded-3xl p-4 sm:p-5 text-center relative shadow-inner transition-all ${
+                    isPaused ? 'opacity-50 border-slate-700' : 'border-slate-700/80'
+                  }`}
                 >
-                  <div className="flex items-center space-x-3">
-                    <div className="w-12 h-12 rounded-2xl bg-emerald-400 text-slate-950 flex items-center justify-center font-bold shadow-md group-hover:scale-105 transition-transform">
-                      <CheckCircle2 className="w-7 h-7 text-slate-950" />
-                    </div>
-                    <div>
-                      <div className="text-lg font-black text-white leading-tight">
-                        बात हो गई ✅
-                      </div>
-                      <div className="text-xs text-emerald-200 mt-0.5 font-medium">
-                        कॉल कनेक्टेड व चर्चा पूर्ण
-                      </div>
-                    </div>
+                  <div className="inline-flex items-center justify-center px-3 py-1 bg-blue-500/10 border border-blue-500/30 text-blue-300 rounded-full text-xs font-semibold tracking-wide mb-2 flex-wrap gap-1">
+                    <span>SOL ID: <strong className="ml-1 text-white">{currentManager.solId}</strong> • Branch Alpha: {currentManager.branchAlpha}</span>
+                    {currentManager.areaCategory && (
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        currentManager.areaCategory === 'RURAL'
+                          ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                          : currentManager.areaCategory === 'SEMI-URBAN'
+                          ? 'bg-teal-500/20 text-teal-300 border border-teal-500/40'
+                          : 'bg-blue-500/20 text-blue-300 border border-blue-500/40'
+                      }`}>
+                        {currentManager.areaCategory === 'RURAL' ? '🌾 Rural' : currentManager.areaCategory === 'SEMI-URBAN' ? '🏘️ Semi-Urban' : '🏙️ Urban'}
+                      </span>
+                    )}
                   </div>
-                  <div className="mt-2 text-[11px] text-emerald-300 font-semibold">
-                    → पूरा मार्क होगा और अगला कॉल स्वतः शुरू होगा
-                  </div>
-                </button>
 
-                {/* 2. Baat Nahi Hui Button */}
-                <button
-                  onClick={() => handleOutcome('not_answered', Boolean(activeEscalation))}
-                  className="group relative p-4 bg-gradient-to-br from-rose-950/80 via-rose-900/90 to-rose-950 border-2 border-rose-500 hover:border-rose-400 rounded-2xl text-left shadow-xl transition-all active:scale-[0.98]"
-                >
-                  <div className="flex items-center space-x-3">
-                    <div className="w-12 h-12 rounded-2xl bg-rose-500 text-white flex items-center justify-center font-bold shadow-md group-hover:scale-105 transition-transform">
-                      <PhoneOff className="w-6 h-6" />
-                    </div>
-                    <div>
-                      <div className="text-lg font-black text-white leading-tight">
-                        बात नहीं हुई ❌
+                  {activeEscalation ? (
+                    <div className="space-y-1 my-1">
+                      <div className="inline-flex items-center space-x-1.5 px-3 py-1 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded-full text-xs font-black animate-pulse">
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>🔄 दूसरा प्रयास (2nd Attempt) — वैकल्पिक अधिकारी</span>
                       </div>
-                      <div className="text-xs text-rose-200 mt-0.5 font-medium">
-                        No Answer / Cut / Unreachable
+                      <div className="text-xs text-rose-300">
+                        पहला कॉल ({currentManager.targetName}) अनुत्तरित रहा
+                      </div>
+                      <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight mt-1">
+                        {activeEscalation.name}
+                      </h2>
+                      <div className="text-sm font-bold text-emerald-400">
+                        📍 {currentManager.branchName} Branch
+                      </div>
+                      <div className="inline-flex items-center space-x-1.5 px-3 py-0.5 bg-indigo-500/20 border border-indigo-400/30 text-indigo-200 rounded-full text-xs font-bold mt-1">
+                        <span>📌 {activeEscalation.position}</span>
+                        <span>• {activeEscalation.grade} ({activeEscalation.cadre})</span>
+                      </div>
+                      <div className="pt-1.5">
+                        <button
+                          onClick={() => setShowingBranchStaffPicker(true)}
+                          className="text-xs text-blue-300 hover:text-white underline font-semibold inline-flex items-center space-x-1"
+                        >
+                          <Users className="w-3.5 h-3.5" />
+                          <span>शाखा का कोई अन्य स्टाफ चुनें ↺</span>
+                        </button>
                       </div>
                     </div>
-                  </div>
-                  <div className="mt-2 text-[11px] text-rose-300 font-semibold">
-                    → पेंडिंग लिस्ट में जाएगा (सारे कॉल के बाद री-डायल)
-                  </div>
-                </button>
-              </div>
+                  ) : (
+                    <>
+                      <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+                        {currentManager.targetName}
+                      </h2>
+                      <div className="text-sm font-bold text-emerald-400 mt-0.5">
+                        📍 {currentManager.branchName} Branch
+                      </div>
 
-              {/* Secondary Options: Busy / Switched Off / Skip */}
-              <div className="grid grid-cols-3 gap-2 pt-1">
-                <button
-                  onClick={() => handleOutcome('busy', Boolean(activeEscalation))}
-                  className="px-3 py-2.5 bg-slate-800 hover:bg-slate-700 border border-amber-500/50 hover:border-amber-400 text-amber-200 text-xs font-bold rounded-xl flex items-center justify-center space-x-1.5 transition-colors"
-                >
-                  <Clock className="w-3.5 h-3.5 text-amber-400" />
-                  <span>व्यस्त (Busy)</span>
-                </button>
-                <button
-                  onClick={() => handleOutcome('switched_off', Boolean(activeEscalation))}
-                  className="px-3 py-2.5 bg-slate-800 hover:bg-slate-700 border border-orange-500/50 hover:border-orange-400 text-orange-200 text-xs font-bold rounded-xl flex items-center justify-center space-x-1.5 transition-colors"
-                >
-                  <AlertTriangle className="w-3.5 h-3.5 text-orange-400" />
-                  <span>बंद / Unreachable</span>
-                </button>
-                <button
-                  onClick={() => handleOutcome('skipped', Boolean(activeEscalation))}
-                  className="px-3 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-600 hover:border-slate-500 text-slate-300 text-xs font-bold rounded-xl flex items-center justify-center space-x-1.5 transition-colors"
-                >
-                  <SkipForward className="w-3.5 h-3.5 text-slate-400" />
-                  <span>छोड़ें (Skip)</span>
-                </button>
-              </div>
-            </div>
+                      {/* Target Position Badge */}
+                      <div className="inline-flex items-center space-x-1.5 px-3.5 py-1 bg-indigo-500/20 border border-indigo-400/30 text-indigo-200 rounded-full text-xs font-bold mt-2">
+                        <span>📌 {currentManager.targetPosition}</span>
+                        {currentManager.targetGrade && <span>• {currentManager.targetGrade}</span>}
+                      </div>
+
+                      {/* Fallback to Branch Head Notice */}
+                      {currentManager.isFallbackToBM && (
+                        <div className="mt-2.5 mx-auto max-w-md px-3.5 py-1.5 bg-amber-500/20 border border-amber-500/50 text-amber-200 rounded-xl text-xs font-bold">
+                          ⚡ ऑटो फॉलबैक: इस शाखा में यह पद नहीं है, इसलिए शाखा प्रबंधक (BM) को कॉल किया जा रहा है
+                        </div>
+                      )}
+
+                      {/* Alternative Staff Available Notice */}
+                      {availableBranchStaff.length > 0 && (
+                        <div className="mt-2.5">
+                          <button
+                            onClick={() => {
+                              setInitialFailedOutcome('not_answered');
+                              setShowingBranchStaffPicker(true);
+                            }}
+                            className="px-3.5 py-1.5 bg-indigo-950/70 hover:bg-indigo-900 border border-indigo-500/40 text-indigo-200 rounded-xl text-xs font-bold inline-flex items-center space-x-1.5 transition-colors"
+                          >
+                            <Users className="w-3.5 h-3.5 text-indigo-400" />
+                            <span>शाखा के अन्य स्टाफ देखें ({availableBranchStaff.length})</span>
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {/* Phone Dial Section */}
+                  <div className="mt-4 pt-4 border-t border-slate-700/80 flex flex-col items-center">
+                    {currentManager.isOnLeave && (
+                      <div className="mb-3 px-3 py-1 bg-amber-950/80 border border-amber-500/50 rounded-xl text-amber-300 text-xs font-bold">
+                        🏖️ यह अधिकारी वर्तमान में छुट्टी पर हैं
+                      </div>
+                    )}
+
+                    <div className="text-2xl sm:text-3xl font-mono font-black tracking-wider text-amber-300">
+                      +91 {activeEscalation ? activeEscalation.phone : currentManager.targetPhone}
+                    </div>
+
+                    {isDialed && (
+                      <div className="mt-2 inline-flex items-center space-x-2 px-3 py-1 bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 rounded-full text-xs font-bold">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                        <span>कॉल समय (Call Duration): {formatTimer(callDuration)}</span>
+                      </div>
+                    )}
+
+                    <div className="mt-3 flex items-center space-x-3">
+                      <button
+                        onClick={() =>
+                          triggerPhoneCall(
+                            activeEscalation ? activeEscalation.phone : currentManager.targetPhone
+                          )
+                        }
+                        className="px-6 py-2.5 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white font-black rounded-2xl shadow-xl shadow-emerald-950/50 flex items-center space-x-2 transition-transform active:scale-95"
+                      >
+                        <Phone className="w-5 h-5" />
+                        <span>{isDialed ? 'फिर से डायल करें (Re-dial)' : 'अभी डायल करें (Dial Now)'}</span>
+                      </button>
+
+                      <button
+                        onClick={openWhatsApp}
+                        className="p-2.5 bg-emerald-800/40 hover:bg-emerald-700/60 border border-emerald-600/40 text-emerald-300 rounded-2xl transition-colors"
+                        title="Send WhatsApp Follow-up message"
+                      >
+                        <MessageSquare className="w-5 h-5" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Prominent Pause / Break Button */}
+                <div className="pt-0.5">
+                  <button
+                    onClick={() => setIsPaused(!isPaused)}
+                    className={`w-full py-3 px-4 rounded-2xl font-black text-xs sm:text-sm flex items-center justify-center space-x-2.5 shadow-lg transition-all active:scale-95 ${
+                      isPaused
+                        ? 'bg-gradient-to-r from-emerald-500 to-green-500 text-slate-950 ring-4 ring-emerald-500/30'
+                        : 'bg-gradient-to-r from-amber-500 via-amber-600 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-slate-950 ring-4 ring-amber-500/20'
+                    }`}
+                  >
+                    {isPaused ? <Play className="w-4 h-4 fill-current" /> : <Pause className="w-4 h-4 fill-current" />}
+                    <span>
+                      {isPaused
+                        ? '▶️ कॉलिंग फिर से शुरू करें (RESUME CALLING)'
+                        : '⏸️ थोड़ी देर के लिए रोकें / ब्रेक लें (PAUSE CALLING)'}
+                    </span>
+                  </button>
+                </div>
+
+                {/* Calling Outcome Decision Area */}
+                <div className="space-y-3 pt-1">
+                  <div className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center justify-between">
+                    <span>कॉल परिणाम चुनें (Call Outcome)</span>
+                    <span className="text-slate-400 text-[11px] font-normal">
+                      (सही विकल्प पर क्लिक करें)
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {/* 1. Baat Ho Gayi Button */}
+                    <button
+                      onClick={() => handleOutcome('connected')}
+                      className="group relative p-4 bg-gradient-to-br from-emerald-900/80 via-emerald-800/90 to-emerald-900 border-2 border-emerald-400 hover:border-emerald-300 rounded-2xl text-left shadow-xl transition-all active:scale-[0.98]"
+                    >
+                      <div className="flex items-center space-x-3">
+                        <div className="w-12 h-12 rounded-2xl bg-emerald-400 text-slate-950 flex items-center justify-center font-bold shadow-md group-hover:scale-105 transition-transform">
+                          <CheckCircle2 className="w-7 h-7 text-slate-950" />
+                        </div>
+                        <div>
+                          <div className="text-lg font-black text-white leading-tight">
+                            {activeEscalation ? '2nd कॉल: बात हो गई ✅' : 'बात हो गई ✅'}
+                          </div>
+                          <div className="text-xs text-emerald-200 mt-0.5 font-medium">
+                            {activeEscalation ? 'वैकल्पिक अधिकारी से बात सफल' : 'कॉल कनेक्टेड व चर्चा पूर्ण'}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="mt-2 text-[11px] text-emerald-300 font-semibold">
+                        → पूरा मार्क होगा और अगला कॉल स्वतः शुरू होगा
+                      </div>
+                    </button>
+
+                    {/* 2. Baat Nahi Hui Button */}
+                    <button
+                      onClick={() => handleOutcome('not_answered')}
+                      className="group relative p-4 bg-gradient-to-br from-rose-950/80 via-rose-900/90 to-rose-950 border-2 border-rose-500 hover:border-rose-400 rounded-2xl text-left shadow-xl transition-all active:scale-[0.98]"
+                    >
+                      <div className="flex items-center space-x-3">
+                        <div className="w-12 h-12 rounded-2xl bg-rose-500 text-white flex items-center justify-center font-bold shadow-md group-hover:scale-105 transition-transform">
+                          <PhoneOff className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <div className="text-lg font-black text-white leading-tight">
+                            {activeEscalation ? '2nd कॉल: बात नहीं हुई ❌' : 'बात नहीं हुई ❌'}
+                          </div>
+                          <div className="text-xs text-rose-200 mt-0.5 font-medium">
+                            {activeEscalation ? 'दूसरा प्रयास भी अनुत्तरित' : 'No Answer / Cut / Unreachable'}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="mt-2 text-[11px] text-rose-300 font-semibold">
+                        {activeEscalation
+                          ? '→ दूसरे प्रयास में भी बात नहीं हुई: स्वतः अगली शाखा पर स्विच होगा'
+                          : availableBranchStaff.length > 0
+                          ? `→ शाखा के अन्य उपलब्ध स्टाफ (${availableBranchStaff.length}) की सूची खुलेगी`
+                          : '→ पेंडिंग लिस्ट में जाएगा और अगली शाखा पर बढ़ेंगे'}
+                      </div>
+                    </button>
+                  </div>
+
+                  {/* Secondary Options: Busy / Switched Off / Skip */}
+                  <div className="grid grid-cols-3 gap-2 pt-1">
+                    <button
+                      onClick={() => handleOutcome('busy')}
+                      className="px-3 py-2.5 bg-slate-800 hover:bg-slate-700 border border-amber-500/50 hover:border-amber-400 text-amber-200 text-xs font-bold rounded-xl flex items-center justify-center space-x-1.5 transition-colors"
+                    >
+                      <Clock className="w-3.5 h-3.5 text-amber-400" />
+                      <span>व्यस्त (Busy)</span>
+                    </button>
+                    <button
+                      onClick={() => handleOutcome('switched_off')}
+                      className="px-3 py-2.5 bg-slate-800 hover:bg-slate-700 border border-orange-500/50 hover:border-orange-400 text-orange-200 text-xs font-bold rounded-xl flex items-center justify-center space-x-1.5 transition-colors"
+                    >
+                      <AlertTriangle className="w-3.5 h-3.5 text-orange-400" />
+                      <span>बंद / Unreachable</span>
+                    </button>
+                    <button
+                      onClick={() => handleOutcome('skipped')}
+                      className="px-3 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-600 hover:border-slate-500 text-slate-300 text-xs font-bold rounded-xl flex items-center justify-center space-x-1.5 transition-colors"
+                    >
+                      <SkipForward className="w-3.5 h-3.5 text-slate-400" />
+                      <span>छोड़ें (Skip)</span>
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
 
             {/* Quick Discussion Topic Tags & Notes */}
             <div className="space-y-2 pt-2 border-t border-slate-800">

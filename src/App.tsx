@@ -54,6 +54,7 @@ import { StaffHierarchyModal } from './components/StaffHierarchyModal';
 import { RegionalStaffModal } from './components/RegionalStaffModal';
 import { ShareModal } from './components/ShareModal';
 import { EditCallStatusModal } from './components/EditCallStatusModal';
+import { RandomBranchDialerTab } from './components/RandomBranchDialerTab';
 import {
   buildDesignationCallingQueue,
   DESIGNATION_OPTIONS,
@@ -64,6 +65,7 @@ import {
 export default function App() {
   const [managers, setManagers] = useState<BranchManager[]>([]);
   const [session, setSession] = useState<DailySession>(loadTodaySession());
+  const [activeMainTab, setActiveMainTab] = useState<'campaign' | 'random_branch'>('campaign');
   const [settings, setSettings] = useState<DialingSettings>(loadSettings());
 
   // Search & Filters
@@ -597,7 +599,52 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 space-y-5">
-        {/* Hero Action Card */}
+        {/* Main Tab Switcher */}
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-1.5 flex items-center gap-1.5 shadow-lg">
+          <button
+            onClick={() => setActiveMainTab('campaign')}
+            className={`flex-1 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-black flex items-center justify-center space-x-2 transition-all ${
+              activeMainTab === 'campaign'
+                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-950/50'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <PhoneCall className="w-4 h-4" />
+            <span>1-by-1 दैनिक ऑटो-कॉलिंग (Daily Campaign)</span>
+            <span className="hidden sm:inline-block text-[11px] font-bold px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-200 border border-blue-400/30">
+              {stats.completionPercent}%
+            </span>
+          </button>
+
+          <button
+            onClick={() => setActiveMainTab('random_branch')}
+            className={`flex-1 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-black flex items-center justify-center space-x-2 transition-all ${
+              activeMainTab === 'random_branch'
+                ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md shadow-purple-950/50'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <Building2 className="w-4 h-4" />
+            <span>🔤 रैंडम / वर्णमाला शाखा डायलर (Branch Directory)</span>
+            <span className="hidden sm:inline-block text-[11px] font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-200 border border-purple-400/30">
+              59 शाखाएं
+            </span>
+          </button>
+        </div>
+
+        {activeMainTab === 'random_branch' ? (
+          <RandomBranchDialerTab
+            managers={managers}
+            session={session}
+            onRecordCall={(branchId, outcome, notes, durationSeconds, tags, contactedPerson) => {
+              handleRecordCall(branchId, outcome, notes, durationSeconds, tags, contactedPerson);
+            }}
+            density={screenDensity}
+            showToast={showToast}
+          />
+        ) : (
+          <div className="space-y-5">
+            {/* Hero Action Card */}
         <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-blue-900 via-indigo-950 to-slate-900 border border-blue-700/50 p-5 sm:p-7 shadow-2xl space-y-5">
           <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
             <div className="space-y-2 max-w-2xl">
@@ -1266,6 +1313,8 @@ export default function App() {
                 </tbody>
               </table>
             </div>
+          </div>
+        )}
           </div>
         )}
       </main>
