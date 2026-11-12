@@ -481,14 +481,14 @@ export default function App() {
     handleResetSession();
   };
 
-  // User request: Delete old data and reload fresh 02.11.2026 data
+  // User request: Delete old data and reload fresh 17.08 Generic data
   const handlePurgeAllOldData = () => {
     purgeAllOldData();
     const freshManagers = loadManagers();
     setManagers(freshManagers);
     const freshSession = loadTodaySession();
     setSession(freshSession);
-    showToast('🗑️ पुराना सारा डेटा डिलीट कर दिया गया! 02.11.2026 की नई लिस्ट ताज़ा लोड हुई।');
+    showToast('🗑️ पुराना सारा डेटा डिलीट कर दिया गया! 17.08 की नई लिस्ट (Branch Alpha आधारित) ताज़ा लोड हुई।');
   };
 
   // Filtered managers for list/table view - also matches against selected designated target officers
@@ -666,7 +666,7 @@ export default function App() {
                   <span>•</span>
                   <span>{scopedManagers.length} {areaCategoryFilter !== 'ALL' ? `${areaCategoryFilter} ` : ''}शाखाएं (Total: 59)</span>
                   <span>•</span>
-                  <span className="text-emerald-300 font-bold">✓ 460 स्टाफ (02.11.2026 नई लिस्ट)</span>
+                  <span className="text-emerald-300 font-bold">✓ 458 स्टाफ (17.08 नई लिस्ट - Alpha आधारित)</span>
                 </div>
                 <button
                   onClick={handlePurgeAllOldData}

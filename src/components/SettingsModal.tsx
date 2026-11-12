@@ -188,12 +188,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <div className="pt-3 border-t border-slate-800 space-y-2">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Reset Actions</span>
             
-            {/* Primary User Request: Purge old data and reload fresh 02.11.2026 data */}
+            {/* Primary User Request: Purge old data and reload fresh 17.08 data */}
             {onPurgeAllOldData && (
               <button
                 type="button"
                 onClick={() => {
-                  if (confirm('क्या आप पुराना सारा डेटा (कॉल लॉग्स, पिछली हिस्ट्री आदि) डिलीट करके 02.11.2026 की नई लिस्ट को ताज़ा लोड करना चाहते हैं?')) {
+                  if (confirm('क्या आप पुराना सारा डेटा (कॉल लॉग्स, पिछली हिस्ट्री आदि) डिलीट करके 17.08 की नई लिस्ट (Branch Alpha आधारित) को ताज़ा लोड करना चाहते हैं?')) {
                     onPurgeAllOldData();
                     onClose();
                   }
@@ -201,7 +201,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 className="w-full p-3 bg-gradient-to-r from-rose-900 to-red-800 hover:from-rose-800 hover:to-red-700 border border-rose-500/50 rounded-xl text-xs font-bold text-white flex items-center justify-center space-x-2 shadow-lg shadow-rose-950/50 transition-all active:scale-95 cursor-pointer"
               >
                 <Trash2 className="w-4 h-4 text-rose-200" />
-                <span>🗑️ पुराना सारा डेटा डिलीट करें एवं नई लिस्ट लोड करें (Fresh 02.11.2026 Data)</span>
+                <span>🗑️ पुराना सारा डेटा डिलीट करें एवं नई लिस्ट लोड करें (Fresh 17.08 Generic Data)</span>
               </button>
             )}
 

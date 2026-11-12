@@ -145,8 +145,8 @@ export const RandomBranchDialerTab: React.FC<RandomBranchDialerTabProps> = ({
   const currentBranchStaff = useMemo(() => {
     if (!selectedBranch) return [];
 
-    // Get non-RO staff for this branch
-    const staffList = getStaffForBranch(selectedBranch.branch);
+    // Get non-RO staff for this branch strictly matched by branchAlpha
+    const staffList = getStaffForBranch(selectedBranch.branch, selectedBranch.branchAlpha);
 
     // Check if the Branch Head from `selectedBranch` is already in staffList
     const hasBranchHead = staffList.some(
@@ -984,7 +984,7 @@ export const RandomBranchDialerTab: React.FC<RandomBranchDialerTabProps> = ({
               (branchLog.outcome === 'not_answered' ||
                 branchLog.outcome === 'busy' ||
                 branchLog.outcome === 'switched_off');
-            const branchStaff = getStaffForBranch(branch.branch);
+            const branchStaff = getStaffForBranch(branch.branch, branch.branchAlpha);
             const staffCount = branchStaff.length || 1;
 
             return (

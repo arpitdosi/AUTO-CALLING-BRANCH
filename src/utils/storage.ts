@@ -1,11 +1,11 @@
 import { BranchManager, CallLogEntry, CallOutcome, DailySession, DialingSettings } from '../types';
 import { INITIAL_BRANCH_MANAGERS } from '../data/defaultManagers';
 
-const MANAGERS_STORAGE_KEY = 'bank_bm_managers_v3';
+const MANAGERS_STORAGE_KEY = 'bank_bm_managers_v4';
 const SESSION_PREFIX = 'bank_bm_daily_session_';
 const SETTINGS_KEY = 'bank_bm_settings_v1';
 export const DATA_VERSION_KEY = 'bob_data_version';
-export const CURRENT_DATA_VERSION = 'v_02_11_2026';
+export const CURRENT_DATA_VERSION = 'v_17_08_generic';
 
 export const DEFAULT_SETTINGS: DialingSettings = {
   autoOpenDialer: true,
@@ -58,7 +58,8 @@ export function purgeAllOldData(): void {
           key.startsWith('bob_') ||
           key.includes('daily_session') ||
           key === 'bank_bm_managers_v1' ||
-          key === 'bank_bm_managers_v2')
+          key === 'bank_bm_managers_v2' ||
+          key === 'bank_bm_managers_v3')
       ) {
         keysToRemove.push(key);
       }

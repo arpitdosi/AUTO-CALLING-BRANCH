@@ -111,7 +111,7 @@ export const AutoDialerModal: React.FC<AutoDialerModalProps> = ({
   // Retrieve all other available staff members for this branch (excluding current dialed officer and RO staff)
   const availableBranchStaff = useMemo(() => {
     if (!currentManager) return [];
-    const allStaff = getStaffForBranch(currentManager.branch);
+    const allStaff = getStaffForBranch(currentManager.branch, currentManager.branchAlpha);
 
     const currentPhone = (activeEscalation ? activeEscalation.phone : currentManager.targetPhone).replace(/[^0-9]/g, '');
     const currentName = (activeEscalation ? activeEscalation.name : currentManager.targetName).trim().toLowerCase();

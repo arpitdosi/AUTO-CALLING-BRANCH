@@ -1,4 +1,5 @@
 import { BHAVNAGAR_REGIONAL_STAFF, RegionalEmployee } from '../data/bhavnagarStaff';
+import { INITIAL_BRANCH_MANAGERS } from '../data/defaultManagers';
 import { BranchManager } from '../types';
 import { isManagerOnLeave, isManagerSkippedToday, getTodayKey } from './storage';
 
@@ -53,28 +54,57 @@ export function normalizeBranchName(name: string): string {
     .replace(/[^A-Z0-9]/g, '');
 }
 
-export function getStaffForBranch(branchName: string): RegionalEmployee[] {
+export function getStaffForBranch(branchName: string, branchAlpha?: string): RegionalEmployee[] {
+  let targetAlpha = (branchAlpha || '').trim().toUpperCase();
+
+  // If no branchAlpha was directly passed, look it up from INITIAL_BRANCH_MANAGERS using branchName
+  if (!targetAlpha && branchName) {
+    const normTarget = normalizeBranchName(branchName);
+    const foundMgr = INITIAL_BRANCH_MANAGERS.find(
+      (m) => normalizeBranchName(m.branch) === normTarget || m.branch.toUpperCase() === branchName.trim().toUpperCase()
+    );
+    if (foundMgr && foundMgr.branchAlpha) {
+      targetAlpha = foundMgr.branchAlpha.trim().toUpperCase();
+    }
+  }
+
+  // PRIMARY CRITICAL MATCHING: Strict matching by branchAlpha so NO staff repeats across branches
+  if (targetAlpha) {
+    return BHAVNAGAR_REGIONAL_STAFF.filter((staff) => {
+      // CRITICAL REQUIREMENT: RO staff must ALWAYS be blocked from the branch calling pipeline
+      if (
+        staff.isROStaff ||
+        staff.category === 'RO' ||
+        staff.solId === '6106' ||
+        staff.branchAlpha.trim().toUpperCase() === 'ROBHAV'
+      ) {
+        return false;
+      }
+      return staff.branchAlpha.trim().toUpperCase() === targetAlpha;
+    });
+  }
+
+  // Strict fallback: Exact normalized branch name only (no fuzzy substring inclusion)
   const normTarget = normalizeBranchName(branchName);
   if (!normTarget) return [];
 
   return BHAVNAGAR_REGIONAL_STAFF.filter((staff) => {
-    // CRITICAL REQUIREMENT: RO staff must ALWAYS be blocked from the branch calling pipeline
-    if (staff.isROStaff || staff.category === 'RO' || staff.solId === '6106') {
+    if (
+      staff.isROStaff ||
+      staff.category === 'RO' ||
+      staff.solId === '6106' ||
+      staff.branchAlpha.trim().toUpperCase() === 'ROBHAV'
+    ) {
       return false;
     }
-    const normStaffBranch = normalizeBranchName(staff.branch);
-    return (
-      normStaffBranch === normTarget ||
-      normStaffBranch.includes(normTarget) ||
-      normTarget.includes(normStaffBranch)
-    );
+    return normalizeBranchName(staff.branch) === normTarget;
   });
 }
 
 /**
  * Builds the designation-wise and area-wise calling list:
  * 1. Filters branches by Area Category (RURAL / SEMI-URBAN / URBAN / ALL).
- * 2. Matches staff with target designation in each branch.
+ * 2. Matches staff with target designation in each branch using branchAlpha.
  * 3. If > 1 staff of that designation: picks 1 (randomly or first), keeps others as alternative.
  * 4. If NO staff with that designation: automatically falls back to Branch Head (Branch Manager).
  * 5. RO staff is ALWAYS excluded from the pipeline.
@@ -96,7 +126,7 @@ export function buildDesignationCallingQueue(
   });
 
   filteredBranches.forEach((branch) => {
-    const branchStaff = getStaffForBranch(branch.branch);
+    const branchStaff = getStaffForBranch(branch.branch, branch.branchAlpha);
 
     // If calling Branch Heads specifically
     if (option.id === 'ALL_BM') {
