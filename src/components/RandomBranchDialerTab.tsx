@@ -31,6 +31,7 @@ import { BHAVNAGAR_REGIONAL_STAFF, RegionalEmployee } from '../data/bhavnagarSta
 import { getStaffForBranch } from '../utils/staffMatcher';
 import { getStaffLeaveEntry, getTodayKey, isStaffOnLeave, playAudioFeedback } from '../utils/storage';
 import { StaffLeaveModal } from './StaffLeaveModal';
+import { StaffWhatsAppModal } from './StaffWhatsAppModal';
 
 interface RandomBranchDialerTabProps {
   managers: BranchManager[];
@@ -61,8 +62,9 @@ export const RandomBranchDialerTab: React.FC<RandomBranchDialerTabProps> = ({
   // Navigation: null = Alphabetical Branch List, object = Branch Staff View
   const [selectedBranch, setSelectedBranch] = useState<BranchManager | null>(null);
 
-  // Staff Leave Modal & On-Leave List Toggle
+  // Staff Leave Modal, WhatsApp Modal & On-Leave List Toggle
   const [leaveModalStaff, setLeaveModalStaff] = useState<RegionalEmployee | null>(null);
+  const [whatsappModalStaff, setWhatsappModalStaff] = useState<RegionalEmployee | null>(null);
   const [showOnLeaveList, setShowOnLeaveList] = useState(false);
 
   // Search & Filters in Alphabetical Branch List
@@ -648,17 +650,15 @@ export const RandomBranchDialerTab: React.FC<RandomBranchDialerTabProps> = ({
 
                     {/* Action Buttons */}
                     <div className="flex items-center space-x-2 pt-2 border-t border-slate-800/80">
-                      {/* WhatsApp Button (only if not on leave, or muted) */}
-                      {!isOnLeave && (
-                        <button
-                          onClick={() => openWhatsApp(staff, selectedBranch.branch)}
-                          className="p-2 sm:px-2.5 sm:py-2 bg-emerald-950/60 hover:bg-emerald-900/80 text-emerald-300 border border-emerald-700/50 rounded-xl text-xs font-semibold transition-colors flex items-center space-x-1"
-                          title="WhatsApp संदेश भेजें"
-                        >
-                          <MessageSquare className="w-3.5 h-3.5" />
-                          <span className="hidden sm:inline">WhatsApp</span>
-                        </button>
-                      )}
+                      {/* Direct WhatsApp Composer Button */}
+                      <button
+                        onClick={() => setWhatsappModalStaff(staff)}
+                        className="p-2 sm:px-2.5 sm:py-2 bg-emerald-950/60 hover:bg-emerald-900/80 text-emerald-300 border border-emerald-700/50 rounded-xl text-xs font-semibold transition-colors flex items-center space-x-1"
+                        title="डायरेक्ट WhatsApp संदेश लिखें व भेजें"
+                      >
+                        <MessageSquare className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">WhatsApp</span>
+                      </button>
 
                       {/* Leave Update / Block Button */}
                       <button
@@ -854,6 +854,15 @@ export const RandomBranchDialerTab: React.FC<RandomBranchDialerTabProps> = ({
           staff={leaveModalStaff}
           existingLeave={leaveModalStaff ? getStaffLeaveEntry(leaveModalStaff, staffLeaves, today) : null}
           onUpdateLeave={onUpdateStaffLeave}
+        />
+
+        {/* Staff Direct WhatsApp Modal */}
+        <StaffWhatsAppModal
+          isOpen={!!whatsappModalStaff}
+          onClose={() => setWhatsappModalStaff(null)}
+          staff={whatsappModalStaff}
+          leaveEntry={whatsappModalStaff ? getStaffLeaveEntry(whatsappModalStaff, staffLeaves, today) : null}
+          onMarkSent={(s) => showToast(`💬 ${s.name} के लिए WhatsApp खोला गया!`)}
         />
       </div>
     );

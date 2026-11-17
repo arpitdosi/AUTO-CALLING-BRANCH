@@ -29,6 +29,7 @@ import {
   EyeOff,
   PhoneIncoming,
   Smartphone,
+  MessageSquare,
 } from 'lucide-react';
 
 import { BranchManager, CallOutcome, DailySession, DialingSettings, CallLogEntry, StaffContact, StaffLeaveEntry } from './types';
@@ -61,6 +62,7 @@ import { RegionalStaffModal } from './components/RegionalStaffModal';
 import { ShareModal } from './components/ShareModal';
 import { EditCallStatusModal } from './components/EditCallStatusModal';
 import { RandomBranchDialerTab } from './components/RandomBranchDialerTab';
+import { DirectWhatsAppTab } from './components/DirectWhatsAppTab';
 import {
   buildDesignationCallingQueue,
   DESIGNATION_OPTIONS,
@@ -72,7 +74,7 @@ export default function App() {
   const [managers, setManagers] = useState<BranchManager[]>([]);
   const [session, setSession] = useState<DailySession>(loadTodaySession());
   const [staffLeaves, setStaffLeaves] = useState<Record<string, StaffLeaveEntry>>(() => loadStaffLeaves());
-  const [activeMainTab, setActiveMainTab] = useState<'campaign' | 'random_branch'>('campaign');
+  const [activeMainTab, setActiveMainTab] = useState<'campaign' | 'random_branch' | 'direct_whatsapp'>('campaign');
   const [settings, setSettings] = useState<DialingSettings>(loadSettings());
 
   // Search & Filters
@@ -657,34 +659,52 @@ export default function App() {
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 space-y-5">
         {/* Main Tab Switcher */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-1.5 flex items-center gap-1.5 shadow-lg">
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-1.5 grid grid-cols-3 gap-1 sm:gap-1.5 shadow-lg">
           <button
             onClick={() => setActiveMainTab('campaign')}
-            className={`flex-1 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-black flex items-center justify-center space-x-2 transition-all ${
+            className={`py-2.5 px-2 sm:px-3 rounded-xl text-[11px] sm:text-sm font-black flex items-center justify-center space-x-1.5 sm:space-x-2 transition-all ${
               activeMainTab === 'campaign'
                 ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-950/50'
                 : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
             }`}
           >
-            <PhoneCall className="w-4 h-4" />
-            <span>1-by-1 दैनिक ऑटो-कॉलिंग (Daily Campaign)</span>
-            <span className="hidden sm:inline-block text-[11px] font-bold px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-200 border border-blue-400/30">
+            <PhoneCall className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+            <span className="truncate sm:hidden">1-by-1 कॉलिंग</span>
+            <span className="hidden sm:inline truncate">1-by-1 दैनिक ऑटो-कॉलिंग</span>
+            <span className="hidden lg:inline-block text-[11px] font-bold px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-200 border border-blue-400/30">
               {stats.completionPercent}%
             </span>
           </button>
 
           <button
             onClick={() => setActiveMainTab('random_branch')}
-            className={`flex-1 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-black flex items-center justify-center space-x-2 transition-all ${
+            className={`py-2.5 px-2 sm:px-3 rounded-xl text-[11px] sm:text-sm font-black flex items-center justify-center space-x-1.5 sm:space-x-2 transition-all ${
               activeMainTab === 'random_branch'
                 ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md shadow-purple-950/50'
                 : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
             }`}
           >
-            <Building2 className="w-4 h-4" />
-            <span>🔤 रैंडम / वर्णमाला शाखा डायलर (Branch Directory)</span>
-            <span className="hidden sm:inline-block text-[11px] font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-200 border border-purple-400/30">
+            <Building2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+            <span className="truncate sm:hidden">शाखा डायलर</span>
+            <span className="hidden sm:inline truncate">🔤 रैंडम / वर्णमाला शाखा डायलर</span>
+            <span className="hidden lg:inline-block text-[11px] font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-200 border border-purple-400/30">
               59 शाखाएं
+            </span>
+          </button>
+
+          <button
+            onClick={() => setActiveMainTab('direct_whatsapp')}
+            className={`py-2.5 px-2 sm:px-3 rounded-xl text-[11px] sm:text-sm font-black flex items-center justify-center space-x-1.5 sm:space-x-2 transition-all ${
+              activeMainTab === 'direct_whatsapp'
+                ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-950/50'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <MessageSquare className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+            <span className="truncate sm:hidden">WhatsApp</span>
+            <span className="hidden sm:inline truncate">💬 डायरेक्ट WhatsApp</span>
+            <span className="hidden lg:inline-block text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-100 border border-emerald-400/30">
+              स्टाफ मैसेज
             </span>
           </button>
         </div>
@@ -698,6 +718,13 @@ export default function App() {
             onRecordCall={(branchId, outcome, notes, durationSeconds, tags, contactedPerson) => {
               handleRecordCall(branchId, outcome, notes, durationSeconds, tags, contactedPerson);
             }}
+            density={screenDensity}
+            showToast={showToast}
+          />
+        ) : activeMainTab === 'direct_whatsapp' ? (
+          <DirectWhatsAppTab
+            managers={managers}
+            staffLeaves={staffLeaves}
             density={screenDensity}
             showToast={showToast}
           />
