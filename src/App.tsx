@@ -31,7 +31,8 @@ import {
   Smartphone,
 } from 'lucide-react';
 
-import { BranchManager, CallOutcome, DailySession, DialingSettings, CallLogEntry, StaffContact } from './types';
+import { BranchManager, CallOutcome, DailySession, DialingSettings, CallLogEntry, StaffContact, StaffLeaveEntry } from './types';
+import { RegionalEmployee } from './data/bhavnagarStaff';
 import {
   loadManagers,
   saveManagers,
@@ -39,6 +40,9 @@ import {
   saveDailySession,
   loadSettings,
   saveSettings,
+  loadStaffLeaves,
+  saveStaffLeaves,
+  getStaffLeaveKey,
   getTodayKey,
   isManagerOnLeave,
   isManagerSkippedToday,
@@ -67,6 +71,7 @@ import {
 export default function App() {
   const [managers, setManagers] = useState<BranchManager[]>([]);
   const [session, setSession] = useState<DailySession>(loadTodaySession());
+  const [staffLeaves, setStaffLeaves] = useState<Record<string, StaffLeaveEntry>>(() => loadStaffLeaves());
   const [activeMainTab, setActiveMainTab] = useState<'campaign' | 'random_branch'>('campaign');
   const [settings, setSettings] = useState<DialingSettings>(loadSettings());
 
@@ -145,6 +150,45 @@ export default function App() {
     });
     setManagers(updated);
     saveManagers(updated);
+  };
+
+  // Staff Leave / Block Update (for Random Calling & Campaign Queues)
+  const handleUpdateStaffLeave = (staff: RegionalEmployee, leaveUntil?: string, reason?: string) => {
+    const staffKey = getStaffLeaveKey(staff);
+    const ec = (staff.ecNo || '').trim();
+    const phoneDigits = (staff.phone || '').replace(/[^0-9]/g, '');
+
+    const updatedLeaves: Record<string, StaffLeaveEntry> = {};
+    // Copy entries excluding any stale entry matching this staff's key, EC no, or phone
+    Object.entries(staffLeaves).forEach(([k, entry]) => {
+      if (!entry) return;
+      if (k === staffKey) return;
+      if (ec && ec.toUpperCase() !== 'BM' && entry.ecNo && entry.ecNo.trim() === ec) return;
+      const entryPhone = (entry.phone || '').replace(/[^0-9]/g, '');
+      if (phoneDigits && entryPhone && entryPhone === phoneDigits) return;
+      updatedLeaves[k] = entry;
+    });
+
+    if (leaveUntil) {
+      updatedLeaves[staffKey] = {
+        staffKey,
+        ecNo: staff.ecNo,
+        name: staff.name,
+        phone: staff.phone,
+        branch: staff.branch,
+        branchAlpha: staff.branchAlpha,
+        position: staff.position,
+        leaveUntil,
+        leaveReason: reason || 'छुट्टी / अवकाश पर',
+        updatedAt: Date.now(),
+      };
+      showToast(`🏖️ ${staff.name} (${staff.branch}) ${leaveUntil} तक छुट्टी पर — कॉल ब्लॉक हो गया!`);
+    } else {
+      showToast(`✅ ${staff.name} (${staff.branch}) की छुट्टी समाप्त — कॉल अनब्लॉक हो गया!`);
+    }
+
+    setStaffLeaves(updatedLeaves);
+    saveStaffLeaves(updatedLeaves);
   };
 
   // Point 2: Update Backup / Alternate Staff contacts
@@ -332,8 +376,8 @@ export default function App() {
 
   // Designation & Area-based calling queue
   const currentDesignationQueue = useMemo(() => {
-    return buildDesignationCallingQueue(selectedDesignation, managers, areaCategoryFilter);
-  }, [selectedDesignation, managers, areaCategoryFilter]);
+    return buildDesignationCallingQueue(selectedDesignation, managers, areaCategoryFilter, staffLeaves);
+  }, [selectedDesignation, managers, areaCategoryFilter, staffLeaves]);
 
   const activeDesignationQueue = useMemo(() => {
     return currentDesignationQueue.filter((item) => !item.isOnLeave && !item.isSkippedToday);
@@ -486,6 +530,7 @@ export default function App() {
     purgeAllOldData();
     const freshManagers = loadManagers();
     setManagers(freshManagers);
+    setStaffLeaves(loadStaffLeaves());
     const freshSession = loadTodaySession();
     setSession(freshSession);
     showToast('🗑️ पुराना सारा डेटा डिलीट कर दिया गया! 17.08 की नई लिस्ट (Branch Alpha आधारित) ताज़ा लोड हुई।');
@@ -571,10 +616,10 @@ export default function App() {
             <button
               onClick={() => setIsRegionalStaffOpen(true)}
               className="p-2 sm:px-3 sm:py-2 bg-indigo-900/60 hover:bg-indigo-800 text-indigo-200 border border-indigo-700/60 rounded-xl text-xs font-semibold flex items-center space-x-1 transition-colors"
-              title="460 रीजनल स्टाफ डायरेक्टरी (RO ब्लॉक)"
+              title="458 रीजनल स्टाफ डायरेक्टरी (RO ब्लॉक)"
             >
               <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-indigo-300" />
-              <span className="hidden md:inline">स्टाफ (460)</span>
+              <span className="hidden md:inline">स्टाफ (458)</span>
             </button>
 
             <button
@@ -648,6 +693,8 @@ export default function App() {
           <RandomBranchDialerTab
             managers={managers}
             session={session}
+            staffLeaves={staffLeaves}
+            onUpdateStaffLeave={handleUpdateStaffLeave}
             onRecordCall={(branchId, outcome, notes, durationSeconds, tags, contactedPerson) => {
               handleRecordCall(branchId, outcome, notes, durationSeconds, tags, contactedPerson);
             }}
@@ -1352,6 +1399,7 @@ export default function App() {
         round={dialerRound}
         onRecordCall={handleRecordCall}
         settings={settings}
+        staffLeaves={staffLeaves}
         onStartPendingRound={startPendingReDialRound}
         pendingCount={stats.pendingCount}
         initialIndex={dialerStartIndex}

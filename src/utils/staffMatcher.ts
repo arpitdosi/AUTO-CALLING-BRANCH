@@ -1,7 +1,7 @@
 import { BHAVNAGAR_REGIONAL_STAFF, RegionalEmployee } from '../data/bhavnagarStaff';
 import { INITIAL_BRANCH_MANAGERS } from '../data/defaultManagers';
-import { BranchManager } from '../types';
-import { isManagerOnLeave, isManagerSkippedToday, getTodayKey } from './storage';
+import { BranchManager, StaffLeaveEntry } from '../types';
+import { isManagerOnLeave, isManagerSkippedToday, getTodayKey, isStaffOnLeave } from './storage';
 
 export interface CampaignCallingItem {
   id: string;
@@ -112,7 +112,8 @@ export function getStaffForBranch(branchName: string, branchAlpha?: string): Reg
 export function buildDesignationCallingQueue(
   selectedDesignationId: string,
   branches: BranchManager[],
-  areaCategoryFilter: 'ALL' | 'RURAL' | 'SEMI-URBAN' | 'URBAN' = 'ALL'
+  areaCategoryFilter: 'ALL' | 'RURAL' | 'SEMI-URBAN' | 'URBAN' = 'ALL',
+  staffLeaves: Record<string, StaffLeaveEntry> = {}
 ): CampaignCallingItem[] {
   const today = getTodayKey();
   const queue: CampaignCallingItem[] = [];
@@ -127,6 +128,9 @@ export function buildDesignationCallingQueue(
 
   filteredBranches.forEach((branch) => {
     const branchStaff = getStaffForBranch(branch.branch, branch.branchAlpha);
+    const bmOnLeave =
+      isManagerOnLeave(branch, today) ||
+      isStaffOnLeave({ phone: branch.phone, id: branch.id }, staffLeaves, today);
 
     // If calling Branch Heads specifically
     if (option.id === 'ALL_BM') {
@@ -148,7 +152,7 @@ export function buildDesignationCallingQueue(
         alternativeStaff: [],
         branchHeadName: branch.name,
         branchHeadPhone: branch.phone,
-        isOnLeave: isManagerOnLeave(branch, today),
+        isOnLeave: bmOnLeave,
         isSkippedToday: isManagerSkippedToday(branch, today),
       });
       return;
@@ -171,11 +175,14 @@ export function buildDesignationCallingQueue(
       matchingStaff = branchStaff.filter((s) => s.position === option.category);
     }
 
-    if (matchingStaff.length > 0) {
+    // Exclude any staff currently on leave so they remain blocked from dialing
+    const activeMatchingStaff = matchingStaff.filter((s) => !isStaffOnLeave(s, staffLeaves, today));
+
+    if (activeMatchingStaff.length > 0) {
       // Pick one randomly or first
-      const randomIndex = Math.floor(Math.random() * matchingStaff.length);
-      const chosen = matchingStaff[randomIndex];
-      const alternatives = matchingStaff.filter((_, idx) => idx !== randomIndex);
+      const randomIndex = Math.floor(Math.random() * activeMatchingStaff.length);
+      const chosen = activeMatchingStaff[randomIndex];
+      const alternatives = activeMatchingStaff.filter((_, idx) => idx !== randomIndex);
 
       queue.push({
         id: `staff_${branch.id}_${chosen.ecNo}`,
@@ -195,11 +202,16 @@ export function buildDesignationCallingQueue(
         alternativeStaff: alternatives,
         branchHeadName: branch.name,
         branchHeadPhone: branch.phone,
-        isOnLeave: isManagerOnLeave(branch, today),
+        isOnLeave: false,
         isSkippedToday: isManagerSkippedToday(branch, today),
       });
     } else {
       // Fallback to Branch Head automatically!
+      const fallbackReason =
+        matchingStaff.length > 0
+          ? `${option.label.split('(')[0].trim()} छुट्टी पर`
+          : `No ${option.label.split('(')[0].trim()} posted`;
+
       queue.push({
         id: `fallback_${branch.id}`,
         branchId: branch.id,
@@ -210,7 +222,7 @@ export function buildDesignationCallingQueue(
         areaCategory: branch.areaCategory,
         targetName: branch.name,
         name: branch.name,
-        targetPosition: `BRANCH HEAD (Fallback - No ${option.label.split('(')[0].trim()} posted)`,
+        targetPosition: `BRANCH HEAD (Fallback - ${fallbackReason})`,
         targetPhone: branch.phone,
         phone: branch.phone,
         targetGrade: 'BM (Fallback)',
@@ -218,7 +230,7 @@ export function buildDesignationCallingQueue(
         alternativeStaff: [],
         branchHeadName: branch.name,
         branchHeadPhone: branch.phone,
-        isOnLeave: isManagerOnLeave(branch, today),
+        isOnLeave: bmOnLeave,
         isSkippedToday: isManagerSkippedToday(branch, today),
       });
     }

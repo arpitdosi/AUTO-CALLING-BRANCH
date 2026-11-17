@@ -76,3 +76,17 @@ export interface DialingSettings {
   detectCallCut: boolean; // Automatically detect when user cuts the call and returns
   autoDialPrepSeconds: number; // Brief preparation countdown before launching phone call (default 2s)
 }
+
+export interface StaffLeaveEntry {
+  staffKey: string; // Canonical identifier (ec_<ecNo> or ph_<digits>)
+  ecNo?: string;
+  name: string;
+  phone: string;
+  branch: string;
+  branchAlpha: string;
+  position?: string;
+  leaveUntil: string; // ISO YYYY-MM-DD: staff is blocked from calling until this date (inclusive)
+  leaveReason?: string;
+  updatedAt: number;
+}
+

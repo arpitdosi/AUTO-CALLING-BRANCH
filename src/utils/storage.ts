@@ -1,7 +1,8 @@
-import { BranchManager, CallLogEntry, CallOutcome, DailySession, DialingSettings } from '../types';
+import { BranchManager, CallLogEntry, CallOutcome, DailySession, DialingSettings, StaffLeaveEntry } from '../types';
 import { INITIAL_BRANCH_MANAGERS } from '../data/defaultManagers';
 
 const MANAGERS_STORAGE_KEY = 'bank_bm_managers_v4';
+const STAFF_LEAVES_STORAGE_KEY = 'bank_bm_staff_leaves_v1';
 const SESSION_PREFIX = 'bank_bm_daily_session_';
 const SETTINGS_KEY = 'bank_bm_settings_v1';
 export const DATA_VERSION_KEY = 'bob_data_version';
@@ -45,6 +46,80 @@ export function calculateDateAfterDays(days: number): string {
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+export function getStaffLeaveKey(staff: { ecNo?: string; phone?: string; id?: string }): string {
+  const ec = (staff.ecNo || '').trim();
+  if (ec && ec.toUpperCase() !== 'BM') {
+    return `ec_${ec}`;
+  }
+  const phoneDigits = (staff.phone || '').replace(/[^0-9]/g, '');
+  if (phoneDigits) {
+    return `ph_${phoneDigits}`;
+  }
+  return `id_${staff.id || ''}`;
+}
+
+export function loadStaffLeaves(): Record<string, StaffLeaveEntry> {
+  try {
+    const raw = localStorage.getItem(STAFF_LEAVES_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.warn('Failed reading staff leaves from storage', err);
+  }
+  return {};
+}
+
+export function saveStaffLeaves(leaves: Record<string, StaffLeaveEntry>): void {
+  try {
+    localStorage.setItem(STAFF_LEAVES_STORAGE_KEY, JSON.stringify(leaves));
+  } catch (err) {
+    console.error('Failed saving staff leaves', err);
+  }
+}
+
+export function getStaffLeaveEntry(
+  staff: { ecNo?: string; phone?: string; id?: string },
+  staffLeaves: Record<string, StaffLeaveEntry>,
+  today = getTodayKey()
+): StaffLeaveEntry | null {
+  if (!staffLeaves) return null;
+
+  const primaryKey = getStaffLeaveKey(staff);
+  const byPrimary = staffLeaves[primaryKey];
+  if (byPrimary && byPrimary.leaveUntil >= today) {
+    return byPrimary;
+  }
+
+  // Also check by EC number or phone digits in case BM / staff entry matched via the other identifier
+  const ec = (staff.ecNo || '').trim();
+  const phoneDigits = (staff.phone || '').replace(/[^0-9]/g, '');
+
+  for (const entry of Object.values(staffLeaves)) {
+    if (!entry || entry.leaveUntil < today) continue;
+    if (ec && ec.toUpperCase() !== 'BM' && entry.ecNo && entry.ecNo.trim() === ec) {
+      return entry;
+    }
+    const entryPhoneDigits = (entry.phone || '').replace(/[^0-9]/g, '');
+    if (phoneDigits && entryPhoneDigits && phoneDigits === entryPhoneDigits) {
+      return entry;
+    }
+  }
+
+  return null;
+}
+
+export function isStaffOnLeave(
+  staff: { ecNo?: string; phone?: string; id?: string },
+  staffLeaves: Record<string, StaffLeaveEntry>,
+  today = getTodayKey()
+): boolean {
+  return getStaffLeaveEntry(staff, staffLeaves, today) !== null;
 }
 
 export function purgeAllOldData(): void {

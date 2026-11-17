@@ -20,16 +20,23 @@ import {
   UserCheck,
   Smartphone,
   ExternalLink,
+  Palmtree,
+  Ban,
+  Calendar,
+  Check,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { BranchManager, CallOutcome, DailySession, BranchAreaCategory } from '../types';
-import { RegionalEmployee } from '../data/bhavnagarStaff';
+import { BranchManager, CallOutcome, DailySession, BranchAreaCategory, StaffLeaveEntry } from '../types';
+import { BHAVNAGAR_REGIONAL_STAFF, RegionalEmployee } from '../data/bhavnagarStaff';
 import { getStaffForBranch } from '../utils/staffMatcher';
-import { playAudioFeedback } from '../utils/storage';
+import { getStaffLeaveEntry, getTodayKey, isStaffOnLeave, playAudioFeedback } from '../utils/storage';
+import { StaffLeaveModal } from './StaffLeaveModal';
 
 interface RandomBranchDialerTabProps {
   managers: BranchManager[];
   session: DailySession;
+  staffLeaves: Record<string, StaffLeaveEntry>;
+  onUpdateStaffLeave: (staff: RegionalEmployee, leaveUntil?: string, reason?: string) => void;
   onRecordCall: (
     branchId: string,
     outcome: CallOutcome,
@@ -45,12 +52,18 @@ interface RandomBranchDialerTabProps {
 export const RandomBranchDialerTab: React.FC<RandomBranchDialerTabProps> = ({
   managers,
   session,
+  staffLeaves,
+  onUpdateStaffLeave,
   onRecordCall,
   density = 'normal',
   showToast,
 }) => {
   // Navigation: null = Alphabetical Branch List, object = Branch Staff View
   const [selectedBranch, setSelectedBranch] = useState<BranchManager | null>(null);
+
+  // Staff Leave Modal & On-Leave List Toggle
+  const [leaveModalStaff, setLeaveModalStaff] = useState<RegionalEmployee | null>(null);
+  const [showOnLeaveList, setShowOnLeaveList] = useState(false);
 
   // Search & Filters in Alphabetical Branch List
   const [searchQuery, setSearchQuery] = useState('');
@@ -65,6 +78,8 @@ export const RandomBranchDialerTab: React.FC<RandomBranchDialerTabProps> = ({
   const [firstAttemptOutcome, setFirstAttemptOutcome] = useState<CallOutcome | null>(null);
   const [callDuration, setCallDuration] = useState<number>(0);
   const [isDialed, setIsDialed] = useState<boolean>(false);
+
+  const today = getTodayKey();
 
   // Call timer interval
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -176,16 +191,33 @@ export const RandomBranchDialerTab: React.FC<RandomBranchDialerTabProps> = ({
         altPhone: selectedBranch.altPhone,
         email: '',
       };
-      return [synthesizedBM, ...staffList];
+      return [synthesizedBM, ...staffList].sort((a, b) => {
+        const aLeave = isStaffOnLeave(a, staffLeaves, today) ? 1 : 0;
+        const bLeave = isStaffOnLeave(b, staffLeaves, today) ? 1 : 0;
+        if (aLeave !== bLeave) return aLeave - bLeave;
+        const isA_BM = a.position?.toUpperCase().includes('BRANCH HEAD') ? -1 : 1;
+        const isB_BM = b.position?.toUpperCase().includes('BRANCH HEAD') ? -1 : 1;
+        return isA_BM - isB_BM;
+      });
     }
 
-    // Sort to place Branch Head and Senior Officers at the top
+    // Sort to place active staff first (Branch Head at top) and on-leave blocked staff at bottom
     return [...staffList].sort((a, b) => {
+      const aLeave = isStaffOnLeave(a, staffLeaves, today) ? 1 : 0;
+      const bLeave = isStaffOnLeave(b, staffLeaves, today) ? 1 : 0;
+      if (aLeave !== bLeave) return aLeave - bLeave;
       const isA_BM = a.position?.toUpperCase().includes('BRANCH HEAD') ? -1 : 1;
       const isB_BM = b.position?.toUpperCase().includes('BRANCH HEAD') ? -1 : 1;
       return isA_BM - isB_BM;
     });
-  }, [selectedBranch]);
+  }, [selectedBranch, staffLeaves, today]);
+
+  // All currently on-leave staff across branches
+  const activeOnLeaveList = useMemo(() => {
+    return Object.values(staffLeaves)
+      .filter((entry) => entry && entry.leaveUntil >= today)
+      .sort((a, b) => a.branch.localeCompare(b.branch));
+  }, [staffLeaves, today]);
 
   // Quick stats
   const branchStats = useMemo(() => {
@@ -208,8 +240,14 @@ export const RandomBranchDialerTab: React.FC<RandomBranchDialerTabProps> = ({
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  // Open dialer and initiate call
+  // Open dialer and initiate call (Strictly blocks calling staff currently on leave)
   const handleInitiateCall = (staff: RegionalEmployee, attempt: 1 | 2) => {
+    const leaveEntry = getStaffLeaveEntry(staff, staffLeaves, today);
+    if (leaveEntry) {
+      showToast(`🚫 ${staff.name} ${leaveEntry.leaveUntil} तक छुट्टी पर हैं — कॉल ब्लॉक है!`);
+      return;
+    }
+
     setActiveCallingStaff(staff);
     setAttemptNumber(attempt);
     setIsDialed(true);
@@ -368,7 +406,7 @@ export const RandomBranchDialerTab: React.FC<RandomBranchDialerTabProps> = ({
             </button>
 
             {/* Area Category and Staff Count */}
-            <div className="flex items-center space-x-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-blue-500/20 text-blue-300 border border-blue-500/30">
                 {selectedBranch.areaCategory === 'RURAL'
                   ? '🌾 RURAL'
@@ -380,8 +418,13 @@ export const RandomBranchDialerTab: React.FC<RandomBranchDialerTabProps> = ({
                 SOL: {selectedBranch.solId}
               </span>
               <span className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                👥 {currentBranchStaff.length} स्टाफ
+                👥 {currentBranchStaff.filter((s) => !isStaffOnLeave(s, staffLeaves, today)).length} सक्रिय स्टाफ
               </span>
+              {currentBranchStaff.some((s) => isStaffOnLeave(s, staffLeaves, today)) && (
+                <span className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                  🏖️ {currentBranchStaff.filter((s) => isStaffOnLeave(s, staffLeaves, today)).length} छुट्टी पर (ब्लॉक)
+                </span>
+              )}
             </div>
           </div>
 
@@ -521,12 +564,16 @@ export const RandomBranchDialerTab: React.FC<RandomBranchDialerTabProps> = ({
                 const wasFirstAttempt =
                   firstAttemptStaff &&
                   (firstAttemptStaff.id === staff.id || firstAttemptStaff.phone === staff.phone);
+                const leaveEntry = getStaffLeaveEntry(staff, staffLeaves, today);
+                const isOnLeave = !!leaveEntry;
 
                 return (
                   <div
                     key={staff.id || staff.ecNo || staff.phone}
                     className={`rounded-2xl border p-3.5 sm:p-4 transition-all flex flex-col justify-between gap-3 ${
-                      wasFirstAttempt
+                      isOnLeave
+                        ? 'bg-amber-950/20 border-amber-500/50 opacity-90'
+                        : wasFirstAttempt
                         ? 'bg-rose-950/30 border-rose-600/50 opacity-80'
                         : isBranchHead
                         ? 'bg-gradient-to-r from-blue-950/70 via-slate-900 to-indigo-950/50 border-blue-500/50 hover:border-blue-400'
@@ -537,8 +584,8 @@ export const RandomBranchDialerTab: React.FC<RandomBranchDialerTabProps> = ({
                       {/* Name & Badges */}
                       <div className="flex items-start justify-between gap-2">
                         <div>
-                          <div className="flex items-center space-x-2 flex-wrap">
-                            <span className="font-black text-white text-sm sm:text-base">
+                          <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                            <span className={`font-black text-sm sm:text-base ${isOnLeave ? 'text-amber-100' : 'text-white'}`}>
                               {staff.name}
                             </span>
                             {isBranchHead && (
@@ -552,13 +599,31 @@ export const RandomBranchDialerTab: React.FC<RandomBranchDialerTabProps> = ({
                           </div>
                         </div>
 
-                        {/* First Attempt Tag */}
-                        {wasFirstAttempt && (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40 shrink-0">
-                            ❌ 1st प्रयास (विफल)
-                          </span>
-                        )}
+                        {/* Leave / First Attempt Tag */}
+                        <div className="flex flex-col items-end gap-1 shrink-0">
+                          {isOnLeave && leaveEntry && (
+                            <span className="px-2 py-0.5 rounded-lg text-[10px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/50 flex items-center space-x-1">
+                              <Ban className="w-3 h-3 text-amber-400" />
+                              <span>छुट्टी पर ({leaveEntry.leaveUntil} तक)</span>
+                            </span>
+                          )}
+                          {wasFirstAttempt && (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40">
+                              ❌ 1st प्रयास (विफल)
+                            </span>
+                          )}
+                        </div>
                       </div>
+
+                      {/* Leave Reason Banner if on leave */}
+                      {isOnLeave && leaveEntry && (
+                        <div className="text-[11px] text-amber-200 bg-amber-950/60 border border-amber-500/30 rounded-xl px-2.5 py-1.5 flex items-center space-x-1.5">
+                          <Palmtree className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                          <span>
+                            <strong>कॉल ब्लॉक:</strong> {leaveEntry.leaveReason || 'छुट्टी / अवकाश पर'}
+                          </span>
+                        </div>
+                      )}
 
                       {/* Meta Information */}
                       <div className="flex items-center space-x-2 text-[11px] text-slate-400 flex-wrap gap-y-1">
@@ -575,44 +640,71 @@ export const RandomBranchDialerTab: React.FC<RandomBranchDialerTabProps> = ({
                         {staff.cadre && <span>{staff.cadre}</span>}
                       </div>
 
-                      <div className="text-xs font-mono font-bold text-slate-300 flex items-center space-x-1 pt-0.5">
-                        <Phone className="w-3.5 h-3.5 text-emerald-400" />
+                      <div className={`text-xs font-mono font-bold flex items-center space-x-1 pt-0.5 ${isOnLeave ? 'text-slate-500 line-through' : 'text-slate-300'}`}>
+                        <Phone className={`w-3.5 h-3.5 ${isOnLeave ? 'text-rose-400' : 'text-emerald-400'}`} />
                         <span>{staff.phone}</span>
                       </div>
                     </div>
 
                     {/* Action Buttons */}
                     <div className="flex items-center space-x-2 pt-2 border-t border-slate-800/80">
-                      {/* WhatsApp Button */}
+                      {/* WhatsApp Button (only if not on leave, or muted) */}
+                      {!isOnLeave && (
+                        <button
+                          onClick={() => openWhatsApp(staff, selectedBranch.branch)}
+                          className="p-2 sm:px-2.5 sm:py-2 bg-emerald-950/60 hover:bg-emerald-900/80 text-emerald-300 border border-emerald-700/50 rounded-xl text-xs font-semibold transition-colors flex items-center space-x-1"
+                          title="WhatsApp संदेश भेजें"
+                        >
+                          <MessageSquare className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">WhatsApp</span>
+                        </button>
+                      )}
+
+                      {/* Leave Update / Block Button */}
                       <button
-                        onClick={() => openWhatsApp(staff, selectedBranch.branch)}
-                        className="p-2 sm:px-2.5 sm:py-2 bg-emerald-950/60 hover:bg-emerald-900/80 text-emerald-300 border border-emerald-700/50 rounded-xl text-xs font-semibold transition-colors flex items-center space-x-1"
-                        title="WhatsApp संदेश भेजें"
+                        onClick={() => setLeaveModalStaff(staff)}
+                        className={`p-2 sm:px-2.5 sm:py-2 rounded-xl text-xs font-bold border transition-colors flex items-center space-x-1 ${
+                          isOnLeave
+                            ? 'bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border-emerald-500/40'
+                            : 'bg-amber-950/60 hover:bg-amber-900/80 text-amber-300 border-amber-700/50'
+                        }`}
+                        title={isOnLeave ? 'छुट्टी बदलें या अनब्लॉक करें' : 'स्टाफ को छुट्टी पर मार्क करके कॉल ब्लॉक करें'}
                       >
-                        <MessageSquare className="w-3.5 h-3.5" />
-                        <span className="hidden sm:inline">WhatsApp</span>
+                        <Palmtree className="w-3.5 h-3.5" />
+                        <span>{isOnLeave ? 'छुट्टी बदलें / अनब्लॉक' : 'छुट्टी'}</span>
                       </button>
 
-                      {/* Call Button */}
-                      <button
-                        onClick={() => handleInitiateCall(staff, isFirstAttemptFailed ? 2 : 1)}
-                        className={`flex-1 py-2 sm:py-2.5 px-3 rounded-xl font-black text-xs sm:text-sm flex items-center justify-center space-x-2 transition-transform active:scale-95 shadow-md ${
-                          isFirstAttemptFailed
-                            ? wasFirstAttempt
-                              ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
-                              : 'bg-gradient-to-r from-amber-500 to-emerald-500 hover:from-amber-400 hover:to-emerald-400 text-slate-950 shadow-amber-950/40'
-                            : 'bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white shadow-emerald-950/40'
-                        }`}
-                      >
-                        <Phone className="w-4 h-4 fill-current" />
-                        <span>
-                          {isFirstAttemptFailed
-                            ? wasFirstAttempt
-                              ? 'पुनः कॉल करें (Re-try)'
-                              : '📞 दूसरा कॉल करें (2nd Attempt)'
-                            : '📞 कॉल करें (Call Now)'}
-                        </span>
-                      </button>
+                      {/* Call Button (Disabled & Blocked when on leave) */}
+                      {isOnLeave ? (
+                        <button
+                          disabled
+                          className="flex-1 py-2 sm:py-2.5 px-3 rounded-xl font-black text-xs sm:text-sm flex items-center justify-center space-x-1.5 bg-slate-800/90 text-rose-300/80 border border-rose-500/30 cursor-not-allowed"
+                          title={`${leaveEntry?.leaveUntil} तक छुट्टी पर — कॉल ब्लॉक है`}
+                        >
+                          <Ban className="w-4 h-4 text-rose-400" />
+                          <span>🚫 कॉल ब्लॉक (छुट्टी पर)</span>
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleInitiateCall(staff, isFirstAttemptFailed ? 2 : 1)}
+                          className={`flex-1 py-2 sm:py-2.5 px-3 rounded-xl font-black text-xs sm:text-sm flex items-center justify-center space-x-2 transition-transform active:scale-95 shadow-md ${
+                            isFirstAttemptFailed
+                              ? wasFirstAttempt
+                                ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+                                : 'bg-gradient-to-r from-amber-500 to-emerald-500 hover:from-amber-400 hover:to-emerald-400 text-slate-950 shadow-amber-950/40'
+                              : 'bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white shadow-emerald-950/40'
+                          }`}
+                        >
+                          <Phone className="w-4 h-4 fill-current" />
+                          <span>
+                            {isFirstAttemptFailed
+                              ? wasFirstAttempt
+                                ? 'पुनः कॉल करें (Re-try)'
+                                : '📞 दूसरा कॉल करें (2nd Attempt)'
+                              : '📞 कॉल करें'}
+                          </span>
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -730,11 +822,23 @@ export const RandomBranchDialerTab: React.FC<RandomBranchDialerTabProps> = ({
                 )}
               </div>
 
-              {/* Close without recording */}
-              <div className="text-center pt-1">
+              {/* Mark On Leave & Close without recording */}
+              <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
+                <button
+                  onClick={() => {
+                    const target = activeCallingStaff;
+                    setActiveCallingStaff(null);
+                    setLeaveModalStaff(target);
+                  }}
+                  className="px-3 py-1.5 bg-amber-950/70 hover:bg-amber-900 text-amber-300 border border-amber-500/40 rounded-xl text-xs font-bold flex items-center space-x-1.5"
+                >
+                  <Palmtree className="w-3.5 h-3.5" />
+                  <span>🏖️ स्टाफ छुट्टी पर है (Block)</span>
+                </button>
+
                 <button
                   onClick={() => setActiveCallingStaff(null)}
-                  className="text-xs text-slate-400 hover:text-white"
+                  className="text-xs text-slate-400 hover:text-white px-2 py-1"
                 >
                   कॉल रद्द करें (Cancel)
                 </button>
@@ -742,6 +846,15 @@ export const RandomBranchDialerTab: React.FC<RandomBranchDialerTabProps> = ({
             </div>
           </div>
         )}
+
+        {/* Staff Leave / DND Modal */}
+        <StaffLeaveModal
+          isOpen={!!leaveModalStaff}
+          onClose={() => setLeaveModalStaff(null)}
+          staff={leaveModalStaff}
+          existingLeave={leaveModalStaff ? getStaffLeaveEntry(leaveModalStaff, staffLeaves, today) : null}
+          onUpdateLeave={onUpdateStaffLeave}
+        />
       </div>
     );
   }
@@ -755,13 +868,22 @@ export const RandomBranchDialerTab: React.FC<RandomBranchDialerTabProps> = ({
       <div className="bg-gradient-to-r from-blue-900 via-indigo-950 to-slate-900 border border-blue-700/50 rounded-3xl p-5 sm:p-6 shadow-xl space-y-3">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="space-y-1">
-            <div className="flex items-center space-x-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-blue-500/20 text-blue-300 border border-blue-400/30 uppercase tracking-wider">
                 A to Z Directory
               </span>
               <span className="text-xs text-blue-200">
-                59 शाखाएं • 460 रीजनल स्टाफ
+                {managers.length} शाखाएं • {BHAVNAGAR_REGIONAL_STAFF.length} रीजनल स्टाफ
               </span>
+              {activeOnLeaveList.length > 0 && (
+                <button
+                  onClick={() => setShowOnLeaveList(!showOnLeaveList)}
+                  className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-400/40 flex items-center space-x-1 transition-colors"
+                >
+                  <Palmtree className="w-3 h-3" />
+                  <span>🏖️ {activeOnLeaveList.length} स्टाफ छुट्टी पर (ब्लॉक) {showOnLeaveList ? '▲' : '▼'}</span>
+                </button>
+              )}
             </div>
             <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center space-x-2">
               <Building2 className="w-6 h-6 text-blue-400" />
@@ -769,7 +891,7 @@ export const RandomBranchDialerTab: React.FC<RandomBranchDialerTabProps> = ({
             </h2>
             <p className="text-xs sm:text-sm text-blue-200 leading-relaxed max-w-3xl">
               यहाँ सभी 59 शाखाएं A-से-Z वर्णमाला क्रम में सूचीबद्ध हैं। जिस शाखा को कॉल करना हो, उस पर क्लिक करें — उस शाखा के सभी उपलब्ध स्टाफ की सूची दिखेगी।
-              पहला कॉल न लगने पर दूसरा अधिकारी चुन सकते हैं, और दूसरे में भी बात न होने पर स्वतः वापस शाखा सूची आ जाएगी।
+              किसी भी स्टाफ के छुट्टी पर होने पर <strong>'🏖️ छुट्टी'</strong> बटन से उसका कॉल ब्लॉक कर सकते हैं।
             </p>
           </div>
 
@@ -789,6 +911,72 @@ export const RandomBranchDialerTab: React.FC<RandomBranchDialerTabProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Collapsible On-Leave Staff Panel */}
+        {showOnLeaveList && activeOnLeaveList.length > 0 && (
+          <div className="mt-3 pt-3 border-t border-blue-800/60 space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-bold text-amber-300 flex items-center space-x-1.5">
+                <Ban className="w-3.5 h-3.5" />
+                <span>छुट्टी पर ब्लॉक किए गए स्टाफ सदस्य ({activeOnLeaveList.length}):</span>
+              </span>
+              <button
+                onClick={() => setShowOnLeaveList(false)}
+                className="text-slate-400 hover:text-white text-[11px]"
+              >
+                बंद करें ✕
+              </button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              {activeOnLeaveList.map((entry) => (
+                <div
+                  key={entry.staffKey}
+                  className="bg-slate-950/80 border border-amber-500/40 rounded-xl p-2.5 flex items-center justify-between gap-2 text-xs"
+                >
+                  <div className="min-w-0">
+                    <div className="font-bold text-white truncate">{entry.name}</div>
+                    <div className="text-[11px] text-slate-400 truncate">
+                      {entry.branch} • {entry.leaveUntil} तक
+                    </div>
+                    {entry.leaveReason && (
+                      <div className="text-[10px] text-amber-300 truncate">{entry.leaveReason}</div>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => {
+                      onUpdateStaffLeave(
+                        {
+                          id: entry.staffKey,
+                          ecNo: entry.ecNo || '',
+                          name: entry.name,
+                          gender: '',
+                          cadre: '',
+                          grade: '',
+                          position: entry.position || '',
+                          solId: '',
+                          branch: entry.branch,
+                          branchAlpha: entry.branchAlpha,
+                          category: 'RURAL',
+                          isROStaff: false,
+                          sinceWhen: '',
+                          phone: entry.phone,
+                          email: '',
+                        },
+                        undefined,
+                        undefined
+                      );
+                    }}
+                    className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-bold shrink-0 flex items-center space-x-1"
+                    title="छुट्टी हटाएं और कॉल चालू करें"
+                  >
+                    <Check className="w-3 h-3" />
+                    <span>अनब्लॉक</span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Alphabet Fast-Jump Bar (A, B, C, D...) */}
@@ -985,6 +1173,8 @@ export const RandomBranchDialerTab: React.FC<RandomBranchDialerTabProps> = ({
                 branchLog.outcome === 'busy' ||
                 branchLog.outcome === 'switched_off');
             const branchStaff = getStaffForBranch(branch.branch, branch.branchAlpha);
+            const onLeaveInBranch = branchStaff.filter((s) => isStaffOnLeave(s, staffLeaves, today)).length;
+            const activeStaffCount = Math.max(0, branchStaff.length - onLeaveInBranch);
             const staffCount = branchStaff.length || 1;
 
             return (
@@ -1031,7 +1221,7 @@ export const RandomBranchDialerTab: React.FC<RandomBranchDialerTabProps> = ({
                     </div>
 
                     {/* Status Badge */}
-                    <div className="shrink-0">
+                    <div className="shrink-0 flex flex-col items-end gap-1">
                       {isConnected ? (
                         <span className="px-2 py-0.5 rounded text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center space-x-1">
                           <CheckCircle2 className="w-3 h-3" />
@@ -1045,6 +1235,11 @@ export const RandomBranchDialerTab: React.FC<RandomBranchDialerTabProps> = ({
                       ) : (
                         <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-400 border border-slate-700">
                           बाकी
+                        </span>
+                      )}
+                      {onLeaveInBranch > 0 && (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                          🏖️ {onLeaveInBranch} छुट्टी पर
                         </span>
                       )}
                     </div>
@@ -1073,7 +1268,11 @@ export const RandomBranchDialerTab: React.FC<RandomBranchDialerTabProps> = ({
                 <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-xs">
                   <span className="text-[11px] font-bold text-indigo-300 flex items-center space-x-1">
                     <Users className="w-3.5 h-3.5" />
-                    <span>{staffCount} स्टाफ उपलब्ध</span>
+                    <span>
+                      {onLeaveInBranch > 0
+                        ? `${activeStaffCount}/${staffCount} सक्रिय`
+                        : `${staffCount} स्टाफ उपलब्ध`}
+                    </span>
                   </span>
 
                   <span className="text-xs font-bold text-blue-400 group-hover:text-blue-300 flex items-center space-x-1">
@@ -1086,6 +1285,15 @@ export const RandomBranchDialerTab: React.FC<RandomBranchDialerTabProps> = ({
           })}
         </div>
       )}
+
+      {/* Staff Leave / DND Modal */}
+      <StaffLeaveModal
+        isOpen={!!leaveModalStaff}
+        onClose={() => setLeaveModalStaff(null)}
+        staff={leaveModalStaff}
+        existingLeave={leaveModalStaff ? getStaffLeaveEntry(leaveModalStaff, staffLeaves, today) : null}
+        onUpdateLeave={onUpdateStaffLeave}
+      />
     </div>
   );
 };

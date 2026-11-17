@@ -21,12 +21,13 @@ import {
   Sparkles,
   Zap,
   Activity,
+  Ban,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { CallOutcome, CallLogEntry, DialingSettings, StaffContact } from '../types';
+import { CallOutcome, CallLogEntry, DialingSettings, StaffContact, StaffLeaveEntry } from '../types';
 import { CampaignCallingItem, getStaffForBranch } from '../utils/staffMatcher';
 import { RegionalEmployee } from '../data/bhavnagarStaff';
-import { playAudioFeedback } from '../utils/storage';
+import { getStaffLeaveEntry, getTodayKey, isStaffOnLeave, playAudioFeedback } from '../utils/storage';
 import { backgroundManager } from '../utils/backgroundManager';
 
 interface AutoDialerModalProps {
@@ -43,6 +44,7 @@ interface AutoDialerModalProps {
     contactedPerson?: string
   ) => void;
   settings: DialingSettings;
+  staffLeaves?: Record<string, StaffLeaveEntry>;
   onStartPendingRound?: () => void;
   pendingCount?: number;
   initialIndex?: number;
@@ -55,6 +57,7 @@ export const AutoDialerModal: React.FC<AutoDialerModalProps> = ({
   round,
   onRecordCall,
   settings,
+  staffLeaves = {},
   onStartPendingRound,
   pendingCount = 0,
   initialIndex = 0,
@@ -108,7 +111,10 @@ export const AutoDialerModal: React.FC<AutoDialerModalProps> = ({
     'Satisfactory',
   ];
 
+  const today = getTodayKey();
+
   // Retrieve all other available staff members for this branch (excluding current dialed officer and RO staff)
+  // Sort active staff before any on-leave blocked staff
   const availableBranchStaff = useMemo(() => {
     if (!currentManager) return [];
     const allStaff = getStaffForBranch(currentManager.branch, currentManager.branchAlpha);
@@ -116,13 +122,19 @@ export const AutoDialerModal: React.FC<AutoDialerModalProps> = ({
     const currentPhone = (activeEscalation ? activeEscalation.phone : currentManager.targetPhone).replace(/[^0-9]/g, '');
     const currentName = (activeEscalation ? activeEscalation.name : currentManager.targetName).trim().toLowerCase();
 
-    return allStaff.filter((s) => {
-      const staffPhone = (s.phone || '').replace(/[^0-9]/g, '');
-      if (staffPhone && staffPhone === currentPhone) return false;
-      if (s.name && s.name.trim().toLowerCase() === currentName) return false;
-      return true;
-    });
-  }, [currentManager, activeEscalation]);
+    return allStaff
+      .filter((s) => {
+        const staffPhone = (s.phone || '').replace(/[^0-9]/g, '');
+        if (staffPhone && staffPhone === currentPhone) return false;
+        if (s.name && s.name.trim().toLowerCase() === currentName) return false;
+        return true;
+      })
+      .sort((a, b) => {
+        const aLeave = isStaffOnLeave(a, staffLeaves, today) ? 1 : 0;
+        const bLeave = isStaffOnLeave(b, staffLeaves, today) ? 1 : 0;
+        return aLeave - bLeave;
+      });
+  }, [currentManager, activeEscalation, staffLeaves, today]);
 
   const triggerPhoneCall = (phoneNumber: string) => {
     if (prepTimerRef.current) {
@@ -237,6 +249,9 @@ export const AutoDialerModal: React.FC<AutoDialerModalProps> = ({
 
   // User selects an alternate staff member from the branch staff list
   const handleSelectBackupStaff = (staff: RegionalEmployee) => {
+    if (isStaffOnLeave(staff, staffLeaves, today)) {
+      return;
+    }
     setActiveEscalation(staff);
     setHasAttemptedBackup(true);
     setShowingBranchStaffPicker(false);
@@ -348,7 +363,8 @@ export const AutoDialerModal: React.FC<AutoDialerModalProps> = ({
 
     // Case 3: 1st Attempt Failed
     // User Requirement: "jab me kisi ko call krne ke baad baat nahi hui par click Karu to turant screen par uss branch ke baki sare staff ki details aa jaye or usme se me kisi ko bhi select krke phir se call kar saku"
-    if (availableBranchStaff.length > 0) {
+    const activeCallableBackupStaff = availableBranchStaff.filter((s) => !isStaffOnLeave(s, staffLeaves, today));
+    if (activeCallableBackupStaff.length > 0) {
       if (settings.soundEffects) {
         playAudioFeedback('pending');
       }
@@ -883,46 +899,70 @@ export const AutoDialerModal: React.FC<AutoDialerModalProps> = ({
 
                 {/* Staff List */}
                 <div className="max-h-[46vh] overflow-y-auto space-y-2 pr-1 -mr-1">
-                  {availableBranchStaff.map((staff: RegionalEmployee) => (
-                    <div
-                      key={staff.id || staff.ecNo}
-                      className="bg-slate-800/90 hover:bg-slate-800 border border-slate-700 hover:border-emerald-500/60 rounded-2xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 transition-all shadow-md"
-                    >
-                      <div className="space-y-0.5 min-w-0">
-                        <div className="flex items-center space-x-2 flex-wrap">
-                          <span className="font-bold text-white text-sm">
-                            {staff.name}
-                          </span>
-                          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-blue-500/20 text-blue-300 border border-blue-500/30">
-                            EC: {staff.ecNo}
-                          </span>
-                          <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-700 text-slate-300">
-                            {staff.grade}
-                          </span>
+                  {availableBranchStaff.map((staff: RegionalEmployee) => {
+                    const leaveEntry = getStaffLeaveEntry(staff, staffLeaves, today);
+                    const staffOnLeave = !!leaveEntry;
+
+                    return (
+                      <div
+                        key={staff.id || staff.ecNo}
+                        className={`rounded-2xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 transition-all shadow-md border ${
+                          staffOnLeave
+                            ? 'bg-amber-950/20 border-amber-500/40 opacity-80'
+                            : 'bg-slate-800/90 hover:bg-slate-800 border-slate-700 hover:border-emerald-500/60'
+                        }`}
+                      >
+                        <div className="space-y-0.5 min-w-0">
+                          <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                            <span className="font-bold text-white text-sm">
+                              {staff.name}
+                            </span>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                              EC: {staff.ecNo}
+                            </span>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-700 text-slate-300">
+                              {staff.grade}
+                            </span>
+                            {staffOnLeave && leaveEntry && (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/50">
+                                🏖️ छुट्टी पर ({leaveEntry.leaveUntil} तक)
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="text-xs font-semibold text-emerald-300 flex items-center space-x-1">
+                            <span>📌 {staff.position}</span>
+                            <span className="text-slate-500">•</span>
+                            <span className="text-slate-400">{staff.cadre}</span>
+                          </div>
+
+                          <div className={`text-xs font-mono font-bold ${staffOnLeave ? 'text-slate-500 line-through' : 'text-amber-300'}`}>
+                            📞 +91 {staff.phone}
+                          </div>
                         </div>
 
-                        <div className="text-xs font-semibold text-emerald-300 flex items-center space-x-1">
-                          <span>📌 {staff.position}</span>
-                          <span className="text-slate-500">•</span>
-                          <span className="text-slate-400">{staff.cadre}</span>
-                        </div>
-
-                        <div className="text-xs font-mono font-bold text-amber-300">
-                          📞 +91 {staff.phone}
+                        <div className="flex items-center space-x-2 shrink-0">
+                          {staffOnLeave ? (
+                            <button
+                              disabled
+                              className="w-full sm:w-auto px-4 py-2 bg-slate-800 text-rose-300 border border-rose-500/30 font-bold rounded-xl text-xs flex items-center justify-center space-x-1.5 cursor-not-allowed"
+                            >
+                              <Ban className="w-3.5 h-3.5 text-rose-400" />
+                              <span>🚫 ब्लॉक (छुट्टी पर)</span>
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleSelectBackupStaff(staff)}
+                              className="w-full sm:w-auto px-4 py-2 bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-400 hover:to-green-500 text-slate-950 font-black rounded-xl text-xs flex items-center justify-center space-x-1.5 shadow-lg shadow-emerald-950/60 transition-transform active:scale-95"
+                            >
+                              <Phone className="w-3.5 h-3.5 fill-current" />
+                              <span>कॉल करें (Call)</span>
+                            </button>
+                          )}
                         </div>
                       </div>
-
-                      <div className="flex items-center space-x-2 shrink-0">
-                        <button
-                          onClick={() => handleSelectBackupStaff(staff)}
-                          className="w-full sm:w-auto px-4 py-2 bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-400 hover:to-green-500 text-slate-950 font-black rounded-xl text-xs flex items-center justify-center space-x-1.5 shadow-lg shadow-emerald-950/60 transition-transform active:scale-95"
-                        >
-                          <Phone className="w-3.5 h-3.5 fill-current" />
-                          <span>कॉल करें (Call)</span>
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 {/* Bottom Action Footer */}
