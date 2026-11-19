@@ -22,13 +22,23 @@ import {
   Zap,
   Activity,
   Ban,
+  Target,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { CallOutcome, CallLogEntry, DialingSettings, StaffContact, StaffLeaveEntry } from '../types';
+import {
+  CallOutcome,
+  CallLogEntry,
+  DialingSettings,
+  StaffContact,
+  StaffLeaveEntry,
+  CustomWorkRole,
+  BranchRoleAssignment,
+} from '../types';
 import { CampaignCallingItem, getStaffForBranch } from '../utils/staffMatcher';
 import { RegionalEmployee } from '../data/bhavnagarStaff';
 import { getStaffLeaveEntry, getTodayKey, isStaffOnLeave, playAudioFeedback } from '../utils/storage';
 import { backgroundManager } from '../utils/backgroundManager';
+import { MarkWorkTargetBranch } from './MarkWorkRoleModal';
 
 interface AutoDialerModalProps {
   isOpen: boolean;
@@ -45,6 +55,12 @@ interface AutoDialerModalProps {
   ) => void;
   settings: DialingSettings;
   staffLeaves?: Record<string, StaffLeaveEntry>;
+  workRoles?: CustomWorkRole[];
+  branchRoleAssignments?: BranchRoleAssignment[];
+  onOpenMarkWork?: (
+    branch: MarkWorkTargetBranch,
+    highlightStaff?: { ecNo?: string; name: string; phone: string; position?: string } | null
+  ) => void;
   onStartPendingRound?: () => void;
   pendingCount?: number;
   initialIndex?: number;
@@ -58,6 +74,9 @@ export const AutoDialerModal: React.FC<AutoDialerModalProps> = ({
   onRecordCall,
   settings,
   staffLeaves = {},
+  workRoles = [],
+  branchRoleAssignments = [],
+  onOpenMarkWork,
   onStartPendingRound,
   pendingCount = 0,
   initialIndex = 0,
@@ -1090,18 +1109,62 @@ export const AutoDialerModal: React.FC<AutoDialerModalProps> = ({
                       </div>
                     )}
 
-                    <div className="mt-3 flex items-center space-x-3">
+                    <div className="mt-3 flex flex-wrap items-center justify-center gap-2.5">
                       <button
                         onClick={() =>
                           triggerPhoneCall(
                             activeEscalation ? activeEscalation.phone : currentManager.targetPhone
                           )
                         }
-                        className="px-6 py-2.5 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white font-black rounded-2xl shadow-xl shadow-emerald-950/50 flex items-center space-x-2 transition-transform active:scale-95"
+                        className="px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white font-black rounded-2xl shadow-xl shadow-emerald-950/50 flex items-center space-x-2 transition-transform active:scale-95 text-xs sm:text-sm"
                       >
-                        <Phone className="w-5 h-5" />
-                        <span>{isDialed ? 'फिर से डायल करें (Re-dial)' : 'अभी डायल करें (Dial Now)'}</span>
+                        <Phone className="w-4 h-4 sm:w-5 sm:h-5" />
+                        <span>{isDialed ? 'फिर से डायल करें' : 'अभी डायल करें'}</span>
                       </button>
+
+                      {onOpenMarkWork && (
+                        <button
+                          onClick={() => {
+                            if (prepTimerRef.current) {
+                              clearInterval(prepTimerRef.current);
+                              prepTimerRef.current = null;
+                              setPrepCountdown(null);
+                            }
+                            if (countdownRef.current) {
+                              clearInterval(countdownRef.current);
+                              countdownRef.current = null;
+                              setNextCallCountdown(null);
+                            }
+                            onOpenMarkWork(
+                              {
+                                branchName: currentManager.branchName,
+                                branchAlpha: currentManager.branchAlpha,
+                                solId: currentManager.solId,
+                                areaCategory: currentManager.areaCategory,
+                                branchHeadName: currentManager.branchHeadName,
+                                branchHeadPhone: currentManager.branchHeadPhone,
+                              },
+                              activeEscalation
+                                ? {
+                                    ecNo: activeEscalation.ecNo,
+                                    name: activeEscalation.name,
+                                    phone: activeEscalation.phone,
+                                    position: activeEscalation.position,
+                                  }
+                                : {
+                                    name: currentManager.targetName,
+                                    phone: currentManager.targetPhone,
+                                    position: currentManager.targetPosition,
+                                  }
+                            );
+                          }}
+                          className="px-3.5 py-2.5 bg-fuchsia-600/25 hover:bg-fuchsia-600/40 border border-fuchsia-400/50 text-fuchsia-200 font-black rounded-2xl flex items-center space-x-1.5 transition-all active:scale-95 text-xs sm:text-sm"
+                          title="इस शाखा में Account Opening या किसी अन्य कार्य के लिए स्टाफ मार्क करें"
+                        >
+                          <Target className="w-4 h-4 text-fuchsia-300" />
+                          <span>🎯 कार्य मार्क करें</span>
+                        </button>
+                      )}
 
                       <button
                         onClick={openWhatsApp}
@@ -1111,6 +1174,30 @@ export const AutoDialerModal: React.FC<AutoDialerModalProps> = ({
                         <MessageSquare className="w-5 h-5" />
                       </button>
                     </div>
+
+                    {/* Show already marked work roles in this branch */}
+                    {(() => {
+                      const alpha = (currentManager.branchAlpha || '').trim().toUpperCase();
+                      const currentBranchMarks = branchRoleAssignments.filter(
+                        (a) => a.branchAlpha.trim().toUpperCase() === alpha
+                      );
+                      if (currentBranchMarks.length === 0) return null;
+                      return (
+                        <div className="mt-3 flex flex-wrap items-center justify-center gap-1.5">
+                          {currentBranchMarks.map((a) => {
+                            const role = workRoles.find((r) => r.id === a.roleId);
+                            return (
+                              <span
+                                key={a.id}
+                                className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-fuchsia-500/20 text-fuchsia-200 border border-fuchsia-400/40"
+                              >
+                                {role?.icon || '🎯'} {role?.shortLabel || a.roleId}: {a.staffName}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
 

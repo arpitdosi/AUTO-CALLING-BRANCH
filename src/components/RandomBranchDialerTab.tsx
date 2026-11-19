@@ -24,20 +24,42 @@ import {
   Ban,
   Calendar,
   Check,
+  Target,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { BranchManager, CallOutcome, DailySession, BranchAreaCategory, StaffLeaveEntry } from '../types';
+import {
+  BranchManager,
+  CallOutcome,
+  DailySession,
+  BranchAreaCategory,
+  StaffLeaveEntry,
+  CustomWorkRole,
+  BranchRoleAssignment,
+} from '../types';
 import { BHAVNAGAR_REGIONAL_STAFF, RegionalEmployee } from '../data/bhavnagarStaff';
 import { getStaffForBranch } from '../utils/staffMatcher';
-import { getStaffLeaveEntry, getTodayKey, isStaffOnLeave, playAudioFeedback } from '../utils/storage';
+import {
+  getStaffLeaveEntry,
+  getTodayKey,
+  isStaffOnLeave,
+  playAudioFeedback,
+  getAssignmentsForStaff,
+} from '../utils/storage';
 import { StaffLeaveModal } from './StaffLeaveModal';
 import { StaffWhatsAppModal } from './StaffWhatsAppModal';
+import { MarkWorkTargetBranch } from './MarkWorkRoleModal';
 
 interface RandomBranchDialerTabProps {
   managers: BranchManager[];
   session: DailySession;
   staffLeaves: Record<string, StaffLeaveEntry>;
   onUpdateStaffLeave: (staff: RegionalEmployee, leaveUntil?: string, reason?: string) => void;
+  workRoles: CustomWorkRole[];
+  branchRoleAssignments: BranchRoleAssignment[];
+  onOpenMarkWork: (
+    branch: MarkWorkTargetBranch,
+    highlightStaff?: { ecNo?: string; name: string; phone: string; position?: string } | null
+  ) => void;
   onRecordCall: (
     branchId: string,
     outcome: CallOutcome,
@@ -55,6 +77,9 @@ export const RandomBranchDialerTab: React.FC<RandomBranchDialerTabProps> = ({
   session,
   staffLeaves,
   onUpdateStaffLeave,
+  workRoles,
+  branchRoleAssignments,
+  onOpenMarkWork,
   onRecordCall,
   density = 'normal',
   showToast,
@@ -646,10 +671,34 @@ export const RandomBranchDialerTab: React.FC<RandomBranchDialerTabProps> = ({
                         <Phone className={`w-3.5 h-3.5 ${isOnLeave ? 'text-rose-400' : 'text-emerald-400'}`} />
                         <span>{staff.phone}</span>
                       </div>
+
+                      {/* Marked Work Roles Badges for this Staff */}
+                      {(() => {
+                        const staffMarks = getAssignmentsForStaff(
+                          { ...staff, branchAlpha: selectedBranch.branchAlpha },
+                          branchRoleAssignments
+                        );
+                        if (staffMarks.length === 0) return null;
+                        return (
+                          <div className="flex flex-wrap gap-1 pt-1">
+                            {staffMarks.map((mark) => {
+                              const role = workRoles.find((r) => r.id === mark.roleId);
+                              return (
+                                <span
+                                  key={mark.id}
+                                  className="px-2 py-0.5 rounded-lg text-[10px] font-black bg-fuchsia-500/20 text-fuchsia-200 border border-fuchsia-400/40"
+                                >
+                                  {role?.icon || '🎯'} {role?.shortLabel || mark.roleId}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
                     </div>
 
                     {/* Action Buttons */}
-                    <div className="flex items-center space-x-2 pt-2 border-t border-slate-800/80">
+                    <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 pt-2 border-t border-slate-800/80">
                       {/* Direct WhatsApp Composer Button */}
                       <button
                         onClick={() => setWhatsappModalStaff(staff)}
@@ -658,6 +707,33 @@ export const RandomBranchDialerTab: React.FC<RandomBranchDialerTabProps> = ({
                       >
                         <MessageSquare className="w-3.5 h-3.5" />
                         <span className="hidden sm:inline">WhatsApp</span>
+                      </button>
+
+                      {/* Mark Work Role Button */}
+                      <button
+                        onClick={() =>
+                          onOpenMarkWork(
+                            {
+                              branchName: selectedBranch.branch,
+                              branchAlpha: selectedBranch.branchAlpha,
+                              solId: selectedBranch.solId,
+                              areaCategory: selectedBranch.areaCategory,
+                              branchHeadName: selectedBranch.name,
+                              branchHeadPhone: selectedBranch.phone,
+                            },
+                            {
+                              ecNo: staff.ecNo,
+                              name: staff.name,
+                              phone: staff.phone,
+                              position: staff.position,
+                            }
+                          )
+                        }
+                        className="p-2 sm:px-2.5 sm:py-2 bg-fuchsia-950/60 hover:bg-fuchsia-900/80 text-fuchsia-200 border border-fuchsia-600/50 rounded-xl text-xs font-bold transition-colors flex items-center space-x-1"
+                        title="इस स्टाफ को किसी कार्य (जैसे Account Opening) के लिए मार्क करें"
+                      >
+                        <Target className="w-3.5 h-3.5 text-fuchsia-300" />
+                        <span>कार्य</span>
                       </button>
 
                       {/* Leave Update / Block Button */}
@@ -671,7 +747,7 @@ export const RandomBranchDialerTab: React.FC<RandomBranchDialerTabProps> = ({
                         title={isOnLeave ? 'छुट्टी बदलें या अनब्लॉक करें' : 'स्टाफ को छुट्टी पर मार्क करके कॉल ब्लॉक करें'}
                       >
                         <Palmtree className="w-3.5 h-3.5" />
-                        <span>{isOnLeave ? 'छुट्टी बदलें / अनब्लॉक' : 'छुट्टी'}</span>
+                        <span>{isOnLeave ? 'अनब्लॉक' : 'छुट्टी'}</span>
                       </button>
 
                       {/* Call Button (Disabled & Blocked when on leave) */}
@@ -822,25 +898,52 @@ export const RandomBranchDialerTab: React.FC<RandomBranchDialerTabProps> = ({
                 )}
               </div>
 
-              {/* Mark On Leave & Close without recording */}
-              <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
-                <button
-                  onClick={() => {
-                    const target = activeCallingStaff;
-                    setActiveCallingStaff(null);
-                    setLeaveModalStaff(target);
-                  }}
-                  className="px-3 py-1.5 bg-amber-950/70 hover:bg-amber-900 text-amber-300 border border-amber-500/40 rounded-xl text-xs font-bold flex items-center space-x-1.5"
-                >
-                  <Palmtree className="w-3.5 h-3.5" />
-                  <span>🏖️ स्टाफ छुट्टी पर है (Block)</span>
-                </button>
+              {/* Mark Work Role, Mark On Leave & Close without recording */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    onClick={() => {
+                      onOpenMarkWork(
+                        {
+                          branchName: selectedBranch.branch,
+                          branchAlpha: selectedBranch.branchAlpha,
+                          solId: selectedBranch.solId,
+                          areaCategory: selectedBranch.areaCategory,
+                          branchHeadName: selectedBranch.name,
+                          branchHeadPhone: selectedBranch.phone,
+                        },
+                        {
+                          ecNo: activeCallingStaff.ecNo,
+                          name: activeCallingStaff.name,
+                          phone: activeCallingStaff.phone,
+                          position: activeCallingStaff.position,
+                        }
+                      );
+                    }}
+                    className="px-3 py-1.5 bg-fuchsia-600/25 hover:bg-fuchsia-600/40 text-fuchsia-200 border border-fuchsia-400/50 rounded-xl text-xs font-bold flex items-center space-x-1.5"
+                  >
+                    <Target className="w-3.5 h-3.5 text-fuchsia-300" />
+                    <span>🎯 कार्य मार्क करें</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      const target = activeCallingStaff;
+                      setActiveCallingStaff(null);
+                      setLeaveModalStaff(target);
+                    }}
+                    className="px-3 py-1.5 bg-amber-950/70 hover:bg-amber-900 text-amber-300 border border-amber-500/40 rounded-xl text-xs font-bold flex items-center space-x-1.5"
+                  >
+                    <Palmtree className="w-3.5 h-3.5" />
+                    <span>🏖️ छुट्टी पर है</span>
+                  </button>
+                </div>
 
                 <button
                   onClick={() => setActiveCallingStaff(null)}
                   className="text-xs text-slate-400 hover:text-white px-2 py-1"
                 >
-                  कॉल रद्द करें (Cancel)
+                  कॉल रद्द करें
                 </button>
               </div>
             </div>

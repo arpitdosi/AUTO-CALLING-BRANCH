@@ -12,10 +12,17 @@ import {
   Sparkles,
   RotateCcw,
   Filter,
+  Target,
 } from 'lucide-react';
 import { BHAVNAGAR_REGIONAL_STAFF, RegionalEmployee } from '../data/bhavnagarStaff';
-import { BranchManager, StaffLeaveEntry } from '../types';
-import { getStaffLeaveEntry, getStaffLeaveKey, getTodayKey, isStaffOnLeave } from '../utils/storage';
+import { BranchManager, StaffLeaveEntry, CustomWorkRole, BranchRoleAssignment } from '../types';
+import {
+  getStaffLeaveEntry,
+  getStaffLeaveKey,
+  getTodayKey,
+  isStaffOnLeave,
+  getAssignmentsForStaff,
+} from '../utils/storage';
 import {
   StaffWhatsAppModal,
   WHATSAPP_QUICK_TEMPLATES,
@@ -25,6 +32,8 @@ import {
 interface DirectWhatsAppTabProps {
   managers: BranchManager[];
   staffLeaves: Record<string, StaffLeaveEntry>;
+  workRoles?: CustomWorkRole[];
+  branchRoleAssignments?: BranchRoleAssignment[];
   density?: 'compact' | 'normal' | 'large';
   showToast: (msg: string) => void;
 }
@@ -55,6 +64,8 @@ function saveTodaySentMap(today: string, map: Record<string, number>): void {
 export const DirectWhatsAppTab: React.FC<DirectWhatsAppTabProps> = ({
   managers,
   staffLeaves,
+  workRoles = [],
+  branchRoleAssignments = [],
   density = 'normal',
   showToast,
 }) => {
@@ -69,6 +80,7 @@ export const DirectWhatsAppTab: React.FC<DirectWhatsAppTabProps> = ({
   const [selectedBranchAlpha, setSelectedBranchAlpha] = useState<string>('ALL');
   const [areaCategoryFilter, setAreaCategoryFilter] = useState<'ALL' | 'RURAL' | 'SEMI-URBAN' | 'URBAN'>('ALL');
   const [designationFilter, setDesignationFilter] = useState<string>('ALL');
+  const [workRoleFilter, setWorkRoleFilter] = useState<string>('ALL');
   const [hideOnLeave, setHideOnLeave] = useState<boolean>(false);
   const [sentFilter, setSentFilter] = useState<'all' | 'sent' | 'unsent'>('all');
 
@@ -141,6 +153,14 @@ export const DirectWhatsAppTab: React.FC<DirectWhatsAppTabProps> = ({
       if (designationFilter !== 'ALL' && staff.position !== designationFilter) {
         return false;
       }
+      if (workRoleFilter !== 'ALL') {
+        const staffAssigns = getAssignmentsForStaff(staff, branchRoleAssignments);
+        if (workRoleFilter === 'ANY_MARKED') {
+          if (staffAssigns.length === 0) return false;
+        } else if (!staffAssigns.some((a) => a.roleId === workRoleFilter)) {
+          return false;
+        }
+      }
       if (hideOnLeave && isStaffOnLeave(staff, staffLeaves, today)) {
         return false;
       }
@@ -167,6 +187,8 @@ export const DirectWhatsAppTab: React.FC<DirectWhatsAppTabProps> = ({
     selectedBranchAlpha,
     areaCategoryFilter,
     designationFilter,
+    workRoleFilter,
+    branchRoleAssignments,
     hideOnLeave,
     staffLeaves,
     today,
@@ -340,6 +362,53 @@ export const DirectWhatsAppTab: React.FC<DirectWhatsAppTabProps> = ({
           </div>
         </div>
 
+        {/* Custom Marked Work Role Quick Filter */}
+        {workRoles.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-800/80">
+            <span className="text-[11px] font-bold text-fuchsia-300 flex items-center space-x-1 mr-1">
+              <Target className="w-3.5 h-3.5" />
+              <span>मार्क कार्य फ़िल्टर:</span>
+            </span>
+            <button
+              onClick={() => setWorkRoleFilter('ALL')}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-colors ${
+                workRoleFilter === 'ALL'
+                  ? 'bg-slate-700 text-white border-slate-500'
+                  : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white'
+              }`}
+            >
+              सभी स्टाफ
+            </button>
+            <button
+              onClick={() => setWorkRoleFilter('ANY_MARKED')}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-colors ${
+                workRoleFilter === 'ANY_MARKED'
+                  ? 'bg-fuchsia-600 text-white border-fuchsia-400'
+                  : 'bg-slate-950 text-fuchsia-300 border-fuchsia-500/30 hover:border-fuchsia-400'
+              }`}
+            >
+              🎯 सभी मार्क किए गए ({branchRoleAssignments.length})
+            </button>
+            {workRoles.map((role) => {
+              const count = branchRoleAssignments.filter((a) => a.roleId === role.id).length;
+              if (count === 0 && workRoleFilter !== role.id) return null;
+              return (
+                <button
+                  key={role.id}
+                  onClick={() => setWorkRoleFilter(role.id)}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-colors ${
+                    workRoleFilter === role.id
+                      ? 'bg-fuchsia-600 text-white border-fuchsia-300 shadow-sm'
+                      : 'bg-slate-950 text-fuchsia-200 border-fuchsia-500/30 hover:border-fuchsia-400'
+                  }`}
+                >
+                  {role.icon} {role.shortLabel} ({count})
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {/* Sub-filters: Sent Status & On-Leave Toggle */}
         <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80 text-xs">
           <div className="flex flex-wrap items-center gap-1.5">
@@ -402,6 +471,7 @@ export const DirectWhatsAppTab: React.FC<DirectWhatsAppTabProps> = ({
               setSelectedBranchAlpha('ALL');
               setAreaCategoryFilter('ALL');
               setDesignationFilter('ALL');
+              setWorkRoleFilter('ALL');
               setHideOnLeave(false);
               setSentFilter('all');
             }}
@@ -476,6 +546,26 @@ export const DirectWhatsAppTab: React.FC<DirectWhatsAppTabProps> = ({
                       )}
                     </div>
                     <div className="text-xs font-semibold text-emerald-300 mt-0.5">{staff.position}</div>
+                    {(() => {
+                      const staffAssigns = getAssignmentsForStaff(staff, branchRoleAssignments);
+                      if (staffAssigns.length === 0) return null;
+                      return (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {staffAssigns.map((a) => {
+                            const role = workRoles.find((r) => r.id === a.roleId);
+                            if (!role) return null;
+                            return (
+                              <span
+                                key={a.id}
+                                className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-fuchsia-500/20 text-fuchsia-200 border border-fuchsia-400/40"
+                              >
+                                {role.icon} {role.shortLabel}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {/* Meta & Phone */}

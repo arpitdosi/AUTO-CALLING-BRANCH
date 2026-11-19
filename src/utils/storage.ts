@@ -1,12 +1,75 @@
-import { BranchManager, CallLogEntry, CallOutcome, DailySession, DialingSettings, StaffLeaveEntry } from '../types';
+import {
+  BranchManager,
+  CallLogEntry,
+  CallOutcome,
+  DailySession,
+  DialingSettings,
+  StaffLeaveEntry,
+  CustomWorkRole,
+  BranchRoleAssignment,
+} from '../types';
 import { INITIAL_BRANCH_MANAGERS } from '../data/defaultManagers';
 
 const MANAGERS_STORAGE_KEY = 'bank_bm_managers_v4';
 const STAFF_LEAVES_STORAGE_KEY = 'bank_bm_staff_leaves_v1';
+const CUSTOM_WORK_ROLES_KEY = 'bank_bm_custom_work_roles_v1';
+const BRANCH_ROLE_ASSIGNMENTS_KEY = 'bank_bm_branch_role_assignments_v1';
 const SESSION_PREFIX = 'bank_bm_daily_session_';
 const SETTINGS_KEY = 'bank_bm_settings_v1';
 export const DATA_VERSION_KEY = 'bob_data_version';
 export const CURRENT_DATA_VERSION = 'v_17_08_generic';
+
+export const DEFAULT_CUSTOM_WORK_ROLES: CustomWorkRole[] = [
+  {
+    id: 'account_opening',
+    label: 'खाता खोलना (Account Opening)',
+    shortLabel: 'Account Opening',
+    icon: '📝',
+    isDefault: true,
+  },
+  {
+    id: 'loan_credit',
+    label: 'लोन / क्रेडिट (Loan & Advances)',
+    shortLabel: 'Loan / Credit',
+    icon: '💳',
+    isDefault: true,
+  },
+  {
+    id: 'npa_recovery',
+    label: 'NPA / रिकवरी (Recovery)',
+    shortLabel: 'NPA / Recovery',
+    icon: '💰',
+    isDefault: true,
+  },
+  {
+    id: 'insurance_tpp',
+    label: 'बीमा / थर्ड पार्टी (Insurance / TPP)',
+    shortLabel: 'Insurance / TPP',
+    icon: '🛡️',
+    isDefault: true,
+  },
+  {
+    id: 'digital_banking',
+    label: 'डिजिटल / M-Connect (Digital)',
+    shortLabel: 'Digital Banking',
+    icon: '📱',
+    isDefault: true,
+  },
+  {
+    id: 'cash_clearing',
+    label: 'कैश / क्लियरिंग (Cash & Ops)',
+    shortLabel: 'Cash / Clearing',
+    icon: '🏦',
+    isDefault: true,
+  },
+  {
+    id: 'kyc_audit',
+    label: 'KYC / ऑडिट (Compliance)',
+    shortLabel: 'KYC / Audit',
+    icon: '📋',
+    isDefault: true,
+  },
+];
 
 export const DEFAULT_SETTINGS: DialingSettings = {
   autoOpenDialer: true,
@@ -120,6 +183,75 @@ export function isStaffOnLeave(
   today = getTodayKey()
 ): boolean {
   return getStaffLeaveEntry(staff, staffLeaves, today) !== null;
+}
+
+export function loadCustomWorkRoles(): CustomWorkRole[] {
+  try {
+    const raw = localStorage.getItem(CUSTOM_WORK_ROLES_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        // Ensure all default roles exist even if user had older saved list
+        const existingIds = new Set(parsed.map((r: CustomWorkRole) => r.id));
+        const missingDefaults = DEFAULT_CUSTOM_WORK_ROLES.filter((d) => !existingIds.has(d.id));
+        return [...parsed, ...missingDefaults];
+      }
+    }
+  } catch (err) {
+    console.warn('Failed reading custom work roles from storage', err);
+  }
+  return DEFAULT_CUSTOM_WORK_ROLES;
+}
+
+export function saveCustomWorkRoles(roles: CustomWorkRole[]): void {
+  try {
+    localStorage.setItem(CUSTOM_WORK_ROLES_KEY, JSON.stringify(roles));
+  } catch (err) {
+    console.error('Failed saving custom work roles', err);
+  }
+}
+
+export function loadBranchRoleAssignments(): BranchRoleAssignment[] {
+  try {
+    const raw = localStorage.getItem(BRANCH_ROLE_ASSIGNMENTS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.warn('Failed reading branch role assignments from storage', err);
+  }
+  return [];
+}
+
+export function saveBranchRoleAssignments(assignments: BranchRoleAssignment[]): void {
+  try {
+    localStorage.setItem(BRANCH_ROLE_ASSIGNMENTS_KEY, JSON.stringify(assignments));
+  } catch (err) {
+    console.error('Failed saving branch role assignments', err);
+  }
+}
+
+export function getAssignmentsForStaff(
+  staff: { ecNo?: string; phone?: string; id?: string; branchAlpha?: string },
+  assignments: BranchRoleAssignment[]
+): BranchRoleAssignment[] {
+  if (!assignments || assignments.length === 0) return [];
+  const key = getStaffLeaveKey(staff);
+  const phoneDigits = (staff.phone || '').replace(/[^0-9]/g, '');
+  const ec = (staff.ecNo || '').trim();
+  const alpha = (staff.branchAlpha || '').trim().toUpperCase();
+
+  return assignments.filter((a) => {
+    if (alpha && a.branchAlpha.trim().toUpperCase() !== alpha) return false;
+    if (a.staffKey === key) return true;
+    if (ec && ec.toUpperCase() !== 'BM' && a.ecNo && a.ecNo.trim() === ec) return true;
+    const aPhone = (a.staffPhone || '').replace(/[^0-9]/g, '');
+    if (phoneDigits && aPhone && aPhone === phoneDigits) return true;
+    return false;
+  });
 }
 
 export function purgeAllOldData(): void {

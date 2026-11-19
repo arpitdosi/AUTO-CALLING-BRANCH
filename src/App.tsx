@@ -30,9 +30,22 @@ import {
   PhoneIncoming,
   Smartphone,
   MessageSquare,
+  Target,
+  Plus,
+  Trash2,
 } from 'lucide-react';
 
-import { BranchManager, CallOutcome, DailySession, DialingSettings, CallLogEntry, StaffContact, StaffLeaveEntry } from './types';
+import {
+  BranchManager,
+  CallOutcome,
+  DailySession,
+  DialingSettings,
+  CallLogEntry,
+  StaffContact,
+  StaffLeaveEntry,
+  CustomWorkRole,
+  BranchRoleAssignment,
+} from './types';
 import { RegionalEmployee } from './data/bhavnagarStaff';
 import {
   loadManagers,
@@ -43,6 +56,10 @@ import {
   saveSettings,
   loadStaffLeaves,
   saveStaffLeaves,
+  loadCustomWorkRoles,
+  saveCustomWorkRoles,
+  loadBranchRoleAssignments,
+  saveBranchRoleAssignments,
   getStaffLeaveKey,
   getTodayKey,
   isManagerOnLeave,
@@ -63,10 +80,12 @@ import { ShareModal } from './components/ShareModal';
 import { EditCallStatusModal } from './components/EditCallStatusModal';
 import { RandomBranchDialerTab } from './components/RandomBranchDialerTab';
 import { DirectWhatsAppTab } from './components/DirectWhatsAppTab';
+import { MarkWorkRoleModal, MarkWorkTargetBranch } from './components/MarkWorkRoleModal';
 import {
   buildDesignationCallingQueue,
   DESIGNATION_OPTIONS,
   AREA_CATEGORY_OPTIONS,
+  WORK_ROLE_PREFIX,
   CampaignCallingItem,
 } from './utils/staffMatcher';
 
@@ -74,6 +93,18 @@ export default function App() {
   const [managers, setManagers] = useState<BranchManager[]>([]);
   const [session, setSession] = useState<DailySession>(loadTodaySession());
   const [staffLeaves, setStaffLeaves] = useState<Record<string, StaffLeaveEntry>>(() => loadStaffLeaves());
+  const [customWorkRoles, setCustomWorkRoles] = useState<CustomWorkRole[]>(() => loadCustomWorkRoles());
+  const [branchRoleAssignments, setBranchRoleAssignments] = useState<BranchRoleAssignment[]>(() =>
+    loadBranchRoleAssignments()
+  );
+  const [onlyMarkedBranches, setOnlyMarkedBranches] = useState<boolean>(true);
+  const [markWorkModalState, setMarkWorkModalState] = useState<{
+    branch: MarkWorkTargetBranch;
+    highlightStaff?: { ecNo?: string; name: string; phone: string; position?: string } | null;
+    initialRoleId?: string;
+  } | null>(null);
+  const [showQuickAddWorkRole, setShowQuickAddWorkRole] = useState<boolean>(false);
+  const [newWorkRoleInput, setNewWorkRoleInput] = useState<string>('');
   const [activeMainTab, setActiveMainTab] = useState<'campaign' | 'random_branch' | 'direct_whatsapp'>('campaign');
   const [settings, setSettings] = useState<DialingSettings>(loadSettings());
 
@@ -191,6 +222,120 @@ export default function App() {
 
     setStaffLeaves(updatedLeaves);
     saveStaffLeaves(updatedLeaves);
+  };
+
+  // Custom Work Role: Create a new work category (e.g., Gold Loan, PMJJBY, Locker)
+  const handleAddCustomWorkRole = (name: string): CustomWorkRole | null => {
+    const clean = name.trim();
+    if (!clean) return null;
+    const existing = customWorkRoles.find(
+      (r) =>
+        r.shortLabel.toLowerCase() === clean.toLowerCase() ||
+        r.label.toLowerCase() === clean.toLowerCase()
+    );
+    if (existing) {
+      showToast(`ℹ️ "${existing.shortLabel}" पहले से मौजूद है!`);
+      return existing;
+    }
+    const slug = clean
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_|_$/g, '');
+    const newRole: CustomWorkRole = {
+      id: `custom_${slug || 'work'}_${Date.now().toString(36)}`,
+      label: clean,
+      shortLabel: clean,
+      icon: '🎯',
+      isDefault: false,
+    };
+    const updated = [...customWorkRoles, newRole];
+    setCustomWorkRoles(updated);
+    saveCustomWorkRoles(updated);
+    showToast(`🎯 नया कार्य "${clean}" जोड़ा गया!`);
+    return newRole;
+  };
+
+  // Custom Work Role: Delete a user-created work category
+  const handleDeleteCustomWorkRole = (roleId: string) => {
+    const target = customWorkRoles.find((r) => r.id === roleId);
+    if (!target || target.isDefault) return;
+    const updatedRoles = customWorkRoles.filter((r) => r.id !== roleId);
+    const updatedAssigns = branchRoleAssignments.filter((a) => a.roleId !== roleId);
+    setCustomWorkRoles(updatedRoles);
+    saveCustomWorkRoles(updatedRoles);
+    setBranchRoleAssignments(updatedAssigns);
+    saveBranchRoleAssignments(updatedAssigns);
+    if (selectedDesignation === `${WORK_ROLE_PREFIX}${roleId}`) {
+      setSelectedDesignation('ALL_BM');
+    }
+    showToast(`🗑️ "${target.shortLabel}" कार्य हटा दिया गया।`);
+  };
+
+  // Custom Work Role: Mark or Unmark a staff member for a work role in a branch (strictly by branchAlpha)
+  const handleToggleBranchRoleAssignment = (
+    roleId: string,
+    branch: MarkWorkTargetBranch,
+    staff: RegionalEmployee
+  ) => {
+    const role = customWorkRoles.find((r) => r.id === roleId);
+    const roleLabel = role ? `${role.icon} ${role.shortLabel}` : 'कार्य';
+    const targetAlpha = (branch.branchAlpha || '').trim().toUpperCase();
+    const staffKey = getStaffLeaveKey(staff);
+    const staffPhoneDigits = (staff.phone || '').replace(/[^0-9]/g, '');
+
+    const existingIndex = branchRoleAssignments.findIndex((a) => {
+      if (a.roleId !== roleId) return false;
+      if (a.branchAlpha.trim().toUpperCase() !== targetAlpha) return false;
+      if (a.staffKey === staffKey) return true;
+      if (staff.ecNo && staff.ecNo !== 'BM' && a.ecNo === staff.ecNo) return true;
+      const aPhone = (a.staffPhone || '').replace(/[^0-9]/g, '');
+      if (staffPhoneDigits && aPhone && aPhone === staffPhoneDigits) return true;
+      return false;
+    });
+
+    let updated: BranchRoleAssignment[];
+    if (existingIndex !== -1) {
+      updated = branchRoleAssignments.filter((_, idx) => idx !== existingIndex);
+      showToast(`❌ ${staff.name} (${branch.branchName}) को ${roleLabel} से हटाया गया।`);
+    } else {
+      const newAssignment: BranchRoleAssignment = {
+        id: `${roleId}_${targetAlpha}_${staffKey}_${Date.now()}`,
+        roleId,
+        branchAlpha: targetAlpha,
+        branchName: branch.branchName,
+        solId: branch.solId,
+        staffKey,
+        ecNo: staff.ecNo || '',
+        staffName: staff.name,
+        staffPhone: staff.phone,
+        staffPosition: staff.position || '',
+        staffGrade: staff.grade || '',
+        markedAt: Date.now(),
+      };
+      updated = [...branchRoleAssignments, newAssignment];
+      showToast(`🎯 ${staff.name} (${branch.branchName}) को ${roleLabel} के लिए मार्क किया गया!`);
+    }
+
+    setBranchRoleAssignments(updated);
+    saveBranchRoleAssignments(updated);
+  };
+
+  // Open the centralized MarkWorkRoleModal from anywhere (Live Dialer, Random Tab, Branch Card)
+  const handleOpenMarkWork = (
+    branch: MarkWorkTargetBranch,
+    highlightStaff?: { ecNo?: string; name: string; phone: string; position?: string } | null,
+    initialRoleId?: string
+  ) => {
+    const defaultRoleId =
+      initialRoleId ||
+      (selectedDesignation.startsWith(WORK_ROLE_PREFIX)
+        ? selectedDesignation.slice(WORK_ROLE_PREFIX.length)
+        : customWorkRoles[0]?.id || 'account_opening');
+    setMarkWorkModalState({
+      branch,
+      highlightStaff: highlightStaff || null,
+      initialRoleId: defaultRoleId,
+    });
   };
 
   // Point 2: Update Backup / Alternate Staff contacts
@@ -348,11 +493,71 @@ export default function App() {
     return managers.filter((m) => isManagerSkippedToday(m, today)).length;
   }, [managers, today]);
 
-  // Scoped managers based on area category selection
-  const scopedManagers = useMemo(() => {
+  // Custom Work Role Selection derived info
+  const isWorkRoleSelected = selectedDesignation.startsWith(WORK_ROLE_PREFIX);
+  const activeWorkRoleId = isWorkRoleSelected ? selectedDesignation.slice(WORK_ROLE_PREFIX.length) : '';
+  const activeWorkRole = useMemo(
+    () => (isWorkRoleSelected ? customWorkRoles.find((r) => r.id === activeWorkRoleId) : undefined),
+    [isWorkRoleSelected, customWorkRoles, activeWorkRoleId]
+  );
+
+  // Scoped managers based on area category selection (base area scope)
+  const areaScopedManagers = useMemo(() => {
     if (areaCategoryFilter === 'ALL') return managers;
     return managers.filter((m) => m.areaCategory === areaCategoryFilter);
   }, [managers, areaCategoryFilter]);
+
+  // Count how many branches in the current area have at least 1 staff marked for a given roleId
+  const getMarkedBranchCountForRole = (roleId: string): number => {
+    const alphas = new Set(
+      branchRoleAssignments
+        .filter((a) => a.roleId === roleId)
+        .map((a) => a.branchAlpha.trim().toUpperCase())
+    );
+    return areaScopedManagers.filter((m) => alphas.has(m.branchAlpha.trim().toUpperCase())).length;
+  };
+
+  const markedCountForSelectedRole = useMemo(() => {
+    if (!isWorkRoleSelected || !activeWorkRoleId) return 0;
+    const alphas = new Set(
+      branchRoleAssignments
+        .filter((a) => a.roleId === activeWorkRoleId)
+        .map((a) => a.branchAlpha.trim().toUpperCase())
+    );
+    return areaScopedManagers.filter((m) => alphas.has(m.branchAlpha.trim().toUpperCase())).length;
+  }, [isWorkRoleSelected, activeWorkRoleId, branchRoleAssignments, areaScopedManagers]);
+
+  // Only restrict queue/list to marked branches when work role is active, toggle is ON, and >= 1 branch is marked
+  const effectiveOnlyMarked =
+    isWorkRoleSelected && onlyMarkedBranches && markedCountForSelectedRole > 0;
+
+  // Designation, Custom Work Role & Area-based calling queue
+  const currentDesignationQueue = useMemo(() => {
+    return buildDesignationCallingQueue(
+      selectedDesignation,
+      managers,
+      areaCategoryFilter,
+      staffLeaves,
+      customWorkRoles,
+      branchRoleAssignments,
+      effectiveOnlyMarked
+    );
+  }, [
+    selectedDesignation,
+    managers,
+    areaCategoryFilter,
+    staffLeaves,
+    customWorkRoles,
+    branchRoleAssignments,
+    effectiveOnlyMarked,
+  ]);
+
+  // Scoped managers matching active area & (if enabled) marked-only custom work role
+  const scopedManagers = useMemo(() => {
+    if (!effectiveOnlyMarked) return areaScopedManagers;
+    const allowedIds = new Set(currentDesignationQueue.map((q) => q.branchId));
+    return areaScopedManagers.filter((m) => allowedIds.has(m.id));
+  }, [areaScopedManagers, effectiveOnlyMarked, currentDesignationQueue]);
 
   // Calculate statistics for active calling scope
   const stats = useMemo(() => {
@@ -375,11 +580,6 @@ export default function App() {
     const completionPercent = total > 0 ? Math.round((connectedCount / total) * 100) : 0;
     return { total, connectedCount, pendingCount, uncalledCount, completionPercent };
   }, [scopedManagers, session.callLogs]);
-
-  // Designation & Area-based calling queue
-  const currentDesignationQueue = useMemo(() => {
-    return buildDesignationCallingQueue(selectedDesignation, managers, areaCategoryFilter, staffLeaves);
-  }, [selectedDesignation, managers, areaCategoryFilter, staffLeaves]);
 
   const activeDesignationQueue = useMemo(() => {
     return currentDesignationQueue.filter((item) => !item.isOnLeave && !item.isSkippedToday);
@@ -533,6 +733,9 @@ export default function App() {
     const freshManagers = loadManagers();
     setManagers(freshManagers);
     setStaffLeaves(loadStaffLeaves());
+    setCustomWorkRoles(loadCustomWorkRoles());
+    setBranchRoleAssignments(loadBranchRoleAssignments());
+    setSelectedDesignation('ALL_BM');
     const freshSession = loadTodaySession();
     setSession(freshSession);
     showToast('🗑️ पुराना सारा डेटा डिलीट कर दिया गया! 17.08 की नई लिस्ट (Branch Alpha आधारित) ताज़ा लोड हुई।');
@@ -547,6 +750,12 @@ export default function App() {
       }
 
       const targetItem = designationItemByBranchId.get(m.id);
+
+      // When filtering strictly to user-marked branches for a custom work role
+      if (effectiveOnlyMarked && !targetItem) {
+        return false;
+      }
+
       // Search filter
       const q = searchQuery.toLowerCase().trim();
       const matchQuery =
@@ -577,7 +786,16 @@ export default function App() {
 
       return true;
     });
-  }, [managers, searchQuery, activeFilter, session.callLogs, today, designationItemByBranchId, areaCategoryFilter]);
+  }, [
+    managers,
+    searchQuery,
+    activeFilter,
+    session.callLogs,
+    today,
+    designationItemByBranchId,
+    areaCategoryFilter,
+    effectiveOnlyMarked,
+  ]);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
@@ -715,6 +933,9 @@ export default function App() {
             session={session}
             staffLeaves={staffLeaves}
             onUpdateStaffLeave={handleUpdateStaffLeave}
+            workRoles={customWorkRoles}
+            branchRoleAssignments={branchRoleAssignments}
+            onOpenMarkWork={handleOpenMarkWork}
             onRecordCall={(branchId, outcome, notes, durationSeconds, tags, contactedPerson) => {
               handleRecordCall(branchId, outcome, notes, durationSeconds, tags, contactedPerson);
             }}
@@ -725,6 +946,8 @@ export default function App() {
           <DirectWhatsAppTab
             managers={managers}
             staffLeaves={staffLeaves}
+            workRoles={customWorkRoles}
+            branchRoleAssignments={branchRoleAssignments}
             density={screenDensity}
             showToast={showToast}
           />
@@ -778,9 +1001,11 @@ export default function App() {
                 <span>
                   {isCampaignPartiallyDone
                     ? `कॉलिंग जारी रखें (Resume #${resumeIndex + 1})`
+                    : isWorkRoleSelected && activeWorkRole
+                    ? `${activeWorkRole.icon} ${activeWorkRole.shortLabel} कॉलिंग शुरू करें (${activeDesignationQueue.length})`
                     : areaCategoryFilter !== 'ALL'
                     ? `${AREA_CATEGORY_OPTIONS.find((a) => a.id === areaCategoryFilter)?.icon} ${AREA_CATEGORY_OPTIONS.find((a) => a.id === areaCategoryFilter)?.label} कॉलिंग शुरू करें (${scopedManagers.length})`
-                    : `1-by-1 कॉलिंग शुरू करें (${managers.length})`}
+                    : `1-by-1 कॉलिंग शुरू करें (${scopedManagers.length})`}
                 </span>
               </button>
 
@@ -890,6 +1115,173 @@ export default function App() {
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* Branch-wise Custom Work Targets (My Marked Work Targets) */}
+          <div className="pt-3 border-t border-fuchsia-700/40 space-y-2.5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                <span className="text-xs font-black text-fuchsia-300 flex items-center space-x-1.5">
+                  <Target className="w-4 h-4 text-fuchsia-400" />
+                  <span>मेरे द्वारा मार्क किए गए कार्य (Branch-wise Work Targets):</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowQuickAddWorkRole(!showQuickAddWorkRole)}
+                  className="px-2.5 py-0.5 bg-fuchsia-600/30 hover:bg-fuchsia-600/50 text-fuchsia-200 border border-fuchsia-400/50 rounded-lg text-[11px] font-bold flex items-center space-x-1 transition-colors"
+                >
+                  <Plus className="w-3 h-3" />
+                  <span>नया कार्य जोड़ें</span>
+                </button>
+              </div>
+              <span className="text-[11px] text-fuchsia-200 bg-fuchsia-950/70 border border-fuchsia-500/30 px-2.5 py-0.5 rounded-full font-semibold">
+                कॉल के दौरान या कार्ड पर "🎯 कार्य" दबाकर शाखा का स्टाफ मार्क करें
+              </span>
+            </div>
+
+            {/* Inline Quick-Add Custom Work Role */}
+            {showQuickAddWorkRole && (
+              <div className="flex items-center gap-2 p-2.5 bg-slate-950/80 border border-fuchsia-500/40 rounded-xl">
+                <input
+                  type="text"
+                  value={newWorkRoleInput}
+                  onChange={(e) => setNewWorkRoleInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && newWorkRoleInput.trim()) {
+                      const created = handleAddCustomWorkRole(newWorkRoleInput);
+                      if (created) {
+                        setSelectedDesignation(`${WORK_ROLE_PREFIX}${created.id}`);
+                        setNewWorkRoleInput('');
+                        setShowQuickAddWorkRole(false);
+                      }
+                    }
+                  }}
+                  placeholder="नया कार्य लिखें (जैसे: Account Opening, Gold Loan, Locker, PMJJBY)..."
+                  className="flex-1 px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-fuchsia-400"
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!newWorkRoleInput.trim()) return;
+                    const created = handleAddCustomWorkRole(newWorkRoleInput);
+                    if (created) {
+                      setSelectedDesignation(`${WORK_ROLE_PREFIX}${created.id}`);
+                      setNewWorkRoleInput('');
+                      setShowQuickAddWorkRole(false);
+                    }
+                  }}
+                  className="px-3 py-1.5 bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-bold rounded-lg text-xs shrink-0"
+                >
+                  जोड़ें ✓
+                </button>
+              </div>
+            )}
+
+            {/* Work Role Buttons Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {customWorkRoles.map((role) => {
+                const roleSelectionId = `${WORK_ROLE_PREFIX}${role.id}`;
+                const isSelected = selectedDesignation === roleSelectionId;
+                const markedBranchesCount = getMarkedBranchCountForRole(role.id);
+
+                return (
+                  <div key={role.id} className="relative group flex items-stretch">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDesignation(roleSelectionId)}
+                      className={`flex-1 py-2 px-2.5 rounded-xl text-xs font-bold text-left transition-all border flex items-center justify-between gap-1.5 min-w-0 ${
+                        isSelected
+                          ? 'bg-gradient-to-r from-fuchsia-600 to-purple-600 text-white border-fuchsia-300 shadow-md ring-2 ring-fuchsia-400/40'
+                          : markedBranchesCount > 0
+                          ? 'bg-fuchsia-950/40 text-fuchsia-100 border-fuchsia-500/40 hover:border-fuchsia-400 hover:bg-fuchsia-950/60'
+                          : 'bg-slate-900/80 text-slate-300 border-slate-700/80 hover:border-fuchsia-500/50 hover:bg-slate-800'
+                      }`}
+                    >
+                      <span className="truncate flex items-center space-x-1.5 min-w-0">
+                        <span className="shrink-0">{role.icon}</span>
+                        <span className="truncate">{role.shortLabel}</span>
+                      </span>
+                      <span
+                        className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono font-black shrink-0 ${
+                          isSelected
+                            ? 'bg-white/20 text-white'
+                            : markedBranchesCount > 0
+                            ? 'bg-emerald-500/25 text-emerald-300 border border-emerald-400/40'
+                            : 'bg-slate-800 text-slate-400'
+                        }`}
+                      >
+                        {markedBranchesCount}/{areaScopedManagers.length}
+                      </span>
+                    </button>
+                    {!role.isDefault && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteCustomWorkRole(role.id)}
+                        className="ml-1 px-1.5 rounded-lg bg-slate-900/80 hover:bg-rose-900/60 text-slate-500 hover:text-rose-300 border border-slate-800 transition-colors"
+                        title="इस कस्टम कार्य को हटाएं"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Active Work Role Mode Controls (Only Marked vs All Branches w/ BM Fallback) */}
+            {isWorkRoleSelected && activeWorkRole && (
+              <div className="p-3 bg-fuchsia-950/50 border border-fuchsia-500/40 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                <div className="text-xs text-fuchsia-100 space-y-0.5">
+                  <div className="font-black flex items-center space-x-1.5 flex-wrap">
+                    <span>
+                      {activeWorkRole.icon} {activeWorkRole.label}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/25 text-emerald-200 border border-emerald-400/40">
+                      {markedCountForSelectedRole} / {areaScopedManagers.length} शाखाएं मार्क
+                    </span>
+                  </div>
+                  {markedCountForSelectedRole === 0 ? (
+                    <p className="text-[11px] text-amber-200">
+                      अभी किसी शाखा में यह कार्य मार्क नहीं है — नीचे से या कॉल के दौरान <strong>"🎯 कार्य"</strong> बटन दबाकर संबंधित स्टाफ को मार्क करें, फिर अगली बार सिर्फ उन्हीं के नंबर आएंगे।
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-fuchsia-200/90">
+                      {effectiveOnlyMarked
+                        ? `केवल आपके द्वारा मार्क की गई ${markedCountForSelectedRole} शाखाओं के चुने हुए स्टाफ के नंबर डायलर में लोड हैं।`
+                        : `मार्क की गई ${markedCountForSelectedRole} शाखाओं में चुने हुए स्टाफ + बाकी ${areaScopedManagers.length - markedCountForSelectedRole} शाखाओं में BM (पूछकर मार्क करने हेतु) लोड हैं।`}
+                    </p>
+                  )}
+                </div>
+
+                {markedCountForSelectedRole > 0 && (
+                  <div className="flex items-center bg-slate-950/90 p-1 rounded-xl border border-fuchsia-500/40 text-[11px] font-bold shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setOnlyMarkedBranches(true)}
+                      className={`px-2.5 py-1.5 rounded-lg transition-colors whitespace-nowrap ${
+                        onlyMarkedBranches
+                          ? 'bg-fuchsia-600 text-white shadow'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      🎯 केवल मार्क शाखाएं ({markedCountForSelectedRole})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOnlyMarkedBranches(false)}
+                      className={`px-2.5 py-1.5 rounded-lg transition-colors whitespace-nowrap ${
+                        !onlyMarkedBranches
+                          ? 'bg-indigo-600 text-white shadow'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      🌐 सभी ({areaScopedManagers.length})
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* How it works collapsible trigger */}
@@ -1187,7 +1579,11 @@ export default function App() {
             </div>
             <div>
               <div className="text-[11px] uppercase tracking-wider font-extrabold text-indigo-300 flex items-center space-x-1.5">
-                <span>🎯 वर्तमान चयनित पद (Selected Calling Position):</span>
+                <span>
+                  {isWorkRoleSelected
+                    ? '🎯 वर्तमान चयनित कार्य (My Marked Work Target):'
+                    : '🎯 वर्तमान चयनित पद (Selected Calling Position):'}
+                </span>
                 {selectedDesignation !== 'ALL_BM' && (
                   <span className="px-2 py-0.2 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded-full text-[10px]">
                     सूची ऑटो-अपडेट हो चुकी है
@@ -1195,10 +1591,16 @@ export default function App() {
                 )}
               </div>
               <div className="text-base sm:text-lg font-black text-white">
-                {DESIGNATION_OPTIONS.find((o) => o.id === selectedDesignation)?.label || selectedDesignation}
+                {isWorkRoleSelected && activeWorkRole
+                  ? `${activeWorkRole.icon} ${activeWorkRole.label}`
+                  : DESIGNATION_OPTIONS.find((o) => o.id === selectedDesignation)?.label || selectedDesignation}
               </div>
               <p className="text-xs text-slate-300 mt-0.5">
-                नीचे सभी 59 शाखाओं के कार्ड्स में इस पद के अधिकारी का नाम व नंबर ऑटो-लोड है। जहाँ यह पद नहीं है, वहाँ BM का नंबर दिखेगा।
+                {isWorkRoleSelected
+                  ? effectiveOnlyMarked
+                    ? `नीचे केवल आपके द्वारा मार्क की गई ${scopedManagers.length} शाखाओं के चुने हुए स्टाफ दिख रहे हैं।`
+                    : 'मार्क की गई शाखाओं में आपका चुना हुआ स्टाफ और बाकी शाखाओं में BM का नंबर ऑटो-लोड है।'
+                  : 'नीचे सभी शाखाओं के कार्ड्स में इस पद के अधिकारी का नाम व नंबर ऑटो-लोड है। जहाँ यह पद नहीं है, वहाँ BM का नंबर दिखेगा।'}
               </p>
             </div>
           </div>
@@ -1274,6 +1676,9 @@ export default function App() {
                   setIsHierarchyModalOpen(true);
                 }}
                 onToggleSkipToday={handleToggleSkipToday}
+                workRoles={customWorkRoles}
+                branchRoleAssignments={branchRoleAssignments}
+                onOpenMarkWork={handleOpenMarkWork}
                 isSkippedToday={isManagerSkippedToday(m, today)}
                 isOnLeave={isManagerOnLeave(m, today)}
                 whatsappTemplate={settings.whatsappTemplate}
@@ -1384,6 +1789,29 @@ export default function App() {
                         </td>
                         <td className="py-3 px-4 text-right space-x-1.5 whitespace-nowrap">
                           <button
+                            onClick={() =>
+                              handleOpenMarkWork(
+                                {
+                                  branchName: m.branch,
+                                  branchAlpha: m.branchAlpha,
+                                  solId: m.solId,
+                                  areaCategory: m.areaCategory,
+                                  branchHeadName: m.name,
+                                  branchHeadPhone: m.phone,
+                                },
+                                {
+                                  name: activeName,
+                                  phone: activePhone,
+                                  position: activeRole,
+                                }
+                              )
+                            }
+                            className="px-2 py-1 bg-fuchsia-950/60 hover:bg-fuchsia-800/70 text-fuchsia-200 border border-fuchsia-500/40 rounded-lg text-xs font-bold transition-colors"
+                            title="शाखा में कार्य के अनुसार स्टाफ मार्क करें"
+                          >
+                            🎯 कार्य
+                          </button>
+                          <button
                             onClick={() => {
                               setStatusEditManager(m);
                               setStatusEditTargetItem(targetItem);
@@ -1427,6 +1855,9 @@ export default function App() {
         onRecordCall={handleRecordCall}
         settings={settings}
         staffLeaves={staffLeaves}
+        workRoles={customWorkRoles}
+        branchRoleAssignments={branchRoleAssignments}
+        onOpenMarkWork={handleOpenMarkWork}
         onStartPendingRound={startPendingReDialRound}
         pendingCount={stats.pendingCount}
         initialIndex={dialerStartIndex}
@@ -1510,6 +1941,20 @@ export default function App() {
         targetOfficerRole={statusEditTargetItem?.targetPosition}
         targetOfficerPhone={statusEditTargetItem?.targetPhone}
         onSaveStatus={handleSaveCallStatus}
+      />
+
+      {/* Branch-wise Custom Work Role Target Marking Modal (layers on top of call modals via z-[60]) */}
+      <MarkWorkRoleModal
+        isOpen={!!markWorkModalState}
+        onClose={() => setMarkWorkModalState(null)}
+        branch={markWorkModalState?.branch || null}
+        highlightStaff={markWorkModalState?.highlightStaff || null}
+        initialRoleId={markWorkModalState?.initialRoleId}
+        workRoles={customWorkRoles}
+        assignments={branchRoleAssignments}
+        onToggleAssignment={handleToggleBranchRoleAssignment}
+        onAddCustomRole={handleAddCustomWorkRole}
+        onDeleteCustomRole={handleDeleteCustomWorkRole}
       />
 
       {/* Floating Feedback Toast */}

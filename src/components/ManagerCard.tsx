@@ -17,9 +17,11 @@ import {
   ShieldAlert,
   UserCheck,
   PhoneIncoming,
+  Target,
 } from 'lucide-react';
-import { BranchManager, CallLogEntry, CallOutcome } from '../types';
+import { BranchManager, CallLogEntry, CallOutcome, CustomWorkRole, BranchRoleAssignment } from '../types';
 import { CampaignCallingItem } from '../utils/staffMatcher';
+import { MarkWorkTargetBranch } from './MarkWorkRoleModal';
 
 interface ManagerCardProps {
   manager: BranchManager;
@@ -35,6 +37,12 @@ interface ManagerCardProps {
   onManageLeave: (manager: BranchManager) => void;
   onManageHierarchy: (manager: BranchManager) => void;
   onToggleSkipToday: (managerId: string) => void;
+  workRoles?: CustomWorkRole[];
+  branchRoleAssignments?: BranchRoleAssignment[];
+  onOpenMarkWork?: (
+    branch: MarkWorkTargetBranch,
+    highlightStaff?: { ecNo?: string; name: string; phone: string; position?: string } | null
+  ) => void;
   isSkippedToday: boolean;
   isOnLeave: boolean;
   whatsappTemplate: string;
@@ -55,6 +63,9 @@ export const ManagerCard: React.FC<ManagerCardProps> = ({
   onManageLeave,
   onManageHierarchy,
   onToggleSkipToday,
+  workRoles = [],
+  branchRoleAssignments = [],
+  onOpenMarkWork,
   isSkippedToday,
   isOnLeave,
   whatsappTemplate,
@@ -62,8 +73,12 @@ export const ManagerCard: React.FC<ManagerCardProps> = ({
 }) => {
   const outcome = callLog?.outcome;
 
-  // Determine active target info based on selected designation
-  const isCustomDesignation = selectedDesignation !== 'BRANCH_HEAD' && !!targetCallingItem;
+  // Determine active target info based on selected designation or custom work role
+  const isCustomDesignation =
+    selectedDesignation !== 'ALL_BM' &&
+    selectedDesignation !== 'BRANCH_HEAD' &&
+    !!targetCallingItem;
+  const isWorkMarked = !!targetCallingItem?.isCustomWorkMarked;
   const activeName = isCustomDesignation ? targetCallingItem.targetName : manager.name;
   const activePhone = isCustomDesignation ? targetCallingItem.targetPhone : manager.phone;
   const activeRole = isCustomDesignation
@@ -72,13 +87,20 @@ export const ManagerCard: React.FC<ManagerCardProps> = ({
   const isFallback = isCustomDesignation && targetCallingItem.isFallbackToBM;
   const altCount = isCustomDesignation ? targetCallingItem.alternativeStaff?.length || 0 : 0;
   const backupCount = manager.backupContacts?.length || 0;
+  const effectiveOnLeave = isOnLeave || (isWorkMarked && !!targetCallingItem?.isOnLeave);
+
+  // Marked work role assignments strictly matched by branchAlpha
+  const branchAlphaUpper = (manager.branchAlpha || '').trim().toUpperCase();
+  const branchMarkedAssignments = branchRoleAssignments.filter(
+    (a) => a.branchAlpha.trim().toUpperCase() === branchAlphaUpper
+  );
 
   const getStatusBadge = () => {
-    if (isOnLeave) {
+    if (effectiveOnLeave) {
       return (
         <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-950/90 text-amber-300 border border-amber-500/60 shadow-sm animate-pulse">
           <Palmtree className="w-3.5 h-3.5 text-amber-400" />
-          <span>छुट्टी पर ({manager.leaveUntil})</span>
+          <span>{manager.leaveUntil ? `छुट्टी पर (${manager.leaveUntil})` : 'मार्क स्टाफ छुट्टी पर'}</span>
         </span>
       );
     }
@@ -162,7 +184,7 @@ export const ManagerCard: React.FC<ManagerCardProps> = ({
           ? 'p-4 sm:p-5 text-sm sm:text-base'
           : 'p-3.5 sm:p-4 text-xs sm:text-sm'
       } ${
-        isOnLeave
+        effectiveOnLeave
           ? 'border-amber-500/40 bg-amber-950/10'
           : isSkippedToday
           ? 'border-slate-700 bg-slate-900/60 opacity-75'
@@ -170,6 +192,8 @@ export const ManagerCard: React.FC<ManagerCardProps> = ({
           ? 'border-emerald-500/40 bg-emerald-950/10'
           : outcome === 'not_answered'
           ? 'border-rose-500/40 bg-rose-950/10'
+          : isWorkMarked
+          ? 'border-fuchsia-500/50 hover:border-fuchsia-400 bg-fuchsia-950/10'
           : isCustomDesignation
           ? 'border-indigo-500/40 hover:border-indigo-400'
           : 'border-slate-700 hover:border-slate-600'
@@ -223,16 +247,24 @@ export const ManagerCard: React.FC<ManagerCardProps> = ({
               <div className="flex items-center flex-wrap gap-1 pt-0.5">
                 <span
                   className={`inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] sm:text-[11px] font-bold max-w-full truncate ${
-                    isCustomDesignation
+                    isWorkMarked
+                      ? 'bg-fuchsia-500/25 text-fuchsia-200 border border-fuchsia-400/50'
+                      : isCustomDesignation
                       ? 'bg-indigo-500/25 text-indigo-200 border border-indigo-400/40'
                       : 'bg-blue-500/15 text-blue-300 border border-blue-400/30'
                   }`}
                 >
-                  <span className="truncate">📌 {activeRole}</span>
+                  <span className="truncate">{isWorkMarked ? '🎯' : '📌'} {activeRole}</span>
                   {isCustomDesignation && targetCallingItem?.targetGrade && (
                     <span className="text-indigo-300 shrink-0">• {targetCallingItem.targetGrade}</span>
                   )}
                 </span>
+
+                {isWorkMarked && (
+                  <span className="px-1.5 py-0.5 bg-emerald-500/20 text-emerald-200 border border-emerald-400/40 rounded-full text-[9px] sm:text-[10px] font-black shrink-0">
+                    ✓ मार्क किया गया
+                  </span>
+                )}
 
                 {isFallback && (
                   <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded-full text-[9px] sm:text-[10px] font-bold flex items-center space-x-1 shrink-0">
@@ -252,6 +284,30 @@ export const ManagerCard: React.FC<ManagerCardProps> = ({
                   </span>
                 )}
               </div>
+
+              {/* Branch Marked Work Role Badges */}
+              {branchMarkedAssignments.length > 0 && (
+                <div className="flex flex-wrap gap-1 pt-1">
+                  {branchMarkedAssignments.slice(0, 3).map((a) => {
+                    const role = workRoles.find((r) => r.id === a.roleId);
+                    if (!role) return null;
+                    return (
+                      <span
+                        key={a.id}
+                        className="px-1.5 py-0.5 rounded-md text-[9px] sm:text-[10px] font-bold bg-fuchsia-500/15 text-fuchsia-200 border border-fuchsia-400/35 truncate max-w-full"
+                        title={`${role.label}: ${a.staffName} (${a.staffPhone})`}
+                      >
+                        {role.icon} {role.shortLabel}: {a.staffName.split(' ')[0]}
+                      </span>
+                    );
+                  })}
+                  {branchMarkedAssignments.length > 3 && (
+                    <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-slate-800 text-fuchsia-300 border border-fuchsia-500/30">
+                      +{branchMarkedAssignments.length - 3}
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="flex items-center space-x-1 text-slate-400 shrink-0">
@@ -314,8 +370,12 @@ export const ManagerCard: React.FC<ManagerCardProps> = ({
           </div>
         </div>
 
-        {/* Point 1, 2, 3 Action Bar - 3 Equal Grid Columns (Never overflows on mobile) */}
-        <div className="mt-2 pt-2 border-t border-slate-700/60 grid grid-cols-3 gap-1 text-xs">
+        {/* Point 1, 2, 3 & Work-Role Action Bar (Never overflows on mobile) */}
+        <div
+          className={`mt-2 pt-2 border-t border-slate-700/60 grid gap-1 text-xs ${
+            onOpenMarkWork ? 'grid-cols-4' : 'grid-cols-3'
+          }`}
+        >
           {/* Leave button */}
           <button
             onClick={() => onManageLeave(manager)}
@@ -327,8 +387,42 @@ export const ManagerCard: React.FC<ManagerCardProps> = ({
             title="छुट्टी / DND सेट करें"
           >
             <Palmtree className="w-3 h-3 text-amber-400 shrink-0" />
-            <span className="truncate">{isOnLeave ? 'छुट्टी' : 'छुट्टी/DND'}</span>
+            <span className="truncate">छुट्टी</span>
           </button>
+
+          {/* Mark Work Role button */}
+          {onOpenMarkWork && (
+            <button
+              onClick={() =>
+                onOpenMarkWork(
+                  {
+                    branchName: manager.branch,
+                    branchAlpha: manager.branchAlpha,
+                    solId: manager.solId,
+                    areaCategory: manager.areaCategory,
+                    branchHeadName: manager.name,
+                    branchHeadPhone: manager.phone,
+                  },
+                  {
+                    name: activeName,
+                    phone: activePhone,
+                    position: activeRole,
+                  }
+                )
+              }
+              className={`py-1 px-1 rounded-lg font-semibold flex items-center justify-center space-x-1 text-[10px] sm:text-[11px] transition-colors min-w-0 ${
+                branchMarkedAssignments.length > 0
+                  ? 'bg-fuchsia-500/25 text-fuchsia-200 border border-fuchsia-400/50'
+                  : 'bg-slate-800 text-fuchsia-300 hover:bg-fuchsia-900/50'
+              }`}
+              title="इस शाखा में कार्य (जैसे Account Opening) के लिए स्टाफ मार्क करें"
+            >
+              <Target className="w-3 h-3 text-fuchsia-400 shrink-0" />
+              <span className="truncate">
+                कार्य{branchMarkedAssignments.length > 0 ? ` (${branchMarkedAssignments.length})` : ''}
+              </span>
+            </button>
+          )}
 
           {/* Staff hierarchy button */}
           <button

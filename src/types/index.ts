@@ -90,3 +90,28 @@ export interface StaffLeaveEntry {
   updatedAt: number;
 }
 
+export interface CustomWorkRole {
+  id: string;
+  label: string;
+  shortLabel: string;
+  icon: string;
+  isDefault?: boolean;
+}
+
+export interface BranchRoleAssignment {
+  id: string; // `${branchAlpha}_${roleId}_${staffKey}`
+  branchAlpha: string; // Strictly matched by Branch Alpha
+  branchName: string;
+  solId: string;
+  roleId: string;
+  staffKey: string;
+  ecNo: string;
+  staffName: string;
+  staffPhone: string;
+  staffPosition: string;
+  staffGrade?: string;
+  markedAt: number;
+  note?: string;
+}
+
+
