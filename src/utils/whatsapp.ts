@@ -18,10 +18,72 @@ export interface WhatsAppTemplate {
   createdAt?: number;
 }
 
+export interface WhatsAppQuickReplyOption {
+  id: string;
+  label: string;
+  replyText: string;
+}
+
+export interface WhatsAppQuickReplyConfig {
+  enabled: boolean;
+  replyPhone: string;
+  options: WhatsAppQuickReplyOption[];
+}
+
 const WA_APP_MODE_KEY = 'bank_bm_wa_app_mode_v1';
 const WA_TEMPLATES_KEY = 'bank_bm_wa_templates_v1';
 const WA_ATTACHMENTS_KEY = 'bank_bm_wa_attachments_v1';
 const WA_ACTIVE_ATTACHMENT_KEY = 'bank_bm_wa_active_attachment_v1';
+const WA_QUICK_REPLY_CONFIG_KEY = 'bank_bm_wa_quick_reply_v1';
+
+export const QUICK_REPLY_PRESETS: {
+  id: string;
+  title: string;
+  options: WhatsAppQuickReplyOption[];
+}[] = [
+  {
+    id: 'work_status',
+    title: '✅ कार्य स्थिति (3 बटन)',
+    options: [
+      { id: 'qr_done', label: '✅ हाँ / कार्य पूरा हुआ', replyText: '✅ कार्य पूरा हो गया है (Confirmed Done)' },
+      { id: 'qr_evening', label: '⏳ आज शाम तक होगा', replyText: '⏳ आज शाम तक पूरा कर देंगे (By Evening)' },
+      { id: 'qr_pending', label: '❌ पेंडिंग / कॉल चाहिए', replyText: '❌ अभी पेंडिंग है, कृपया कॉल करें (Need Help)' },
+    ],
+  },
+  {
+    id: 'yes_no',
+    title: '👍 हाँ / नहीं (2 बटन)',
+    options: [
+      { id: 'qr_yes', label: '✅ हाँ (Confirm / Yes)', replyText: '✅ हाँ, कन्फर्म है (Confirmed Yes)' },
+      { id: 'qr_no', label: '❌ नहीं (No / Not Done)', replyText: '❌ अभी नहीं हुआ (Not Yet / No)' },
+    ],
+  },
+  {
+    id: 'vc_meeting',
+    title: '💻 VC / मीटिंग (3 बटन)',
+    options: [
+      { id: 'qr_join', label: '✅ समय पर जुड़ेंगे', replyText: '✅ समय पर VC/मीटिंग में जुड़ रहे हैं' },
+      { id: 'qr_other', label: '👤 अन्य स्टाफ जुड़ेगा', replyText: '👤 शाखा से अन्य अधिकारी जुड़ेंगे' },
+      { id: 'qr_leave', label: '🏖️ छुट्टी / बाहर हूँ', replyText: '🏖️ मैं आज छुट्टी/बाहर हूँ' },
+    ],
+  },
+  {
+    id: 'four_options',
+    title: '📋 4 विकल्प (Done/Progress/Call/Leave)',
+    options: [
+      { id: 'qr_4_done', label: '✅ पूरा हो गया', replyText: '✅ कार्य पूरा हो गया है (Done)' },
+      { id: 'qr_4_prog', label: '⏳ प्रक्रिया में है', replyText: '⏳ कार्य प्रक्रिया में है, जल्द अपडेट देंगे' },
+      { id: 'qr_4_call', label: '📞 कॉल बैक करें', replyText: '📞 कृपया इस विषय पर कॉल करें' },
+      { id: 'qr_4_leave', label: '🏖️ आज छुट्टी पर हूँ', replyText: '🏖️ मैं आज अवकाश पर हूँ' },
+    ],
+  },
+];
+
+export const DEFAULT_QUICK_REPLY_CONFIG: WhatsAppQuickReplyConfig = {
+  enabled: false,
+  replyPhone: '',
+  options: QUICK_REPLY_PRESETS[0].options,
+};
 
 export const DEFAULT_WHATSAPP_TEMPLATES: WhatsAppTemplate[] = [
   {
@@ -150,16 +212,92 @@ export function saveActiveWhatsAppAttachmentId(id: string | null): void {
   }
 }
 
+export function loadWhatsAppQuickReplyConfig(): WhatsAppQuickReplyConfig {
+  try {
+    const raw = localStorage.getItem(WA_QUICK_REPLY_CONFIG_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        return {
+          enabled: !!parsed.enabled,
+          replyPhone: typeof parsed.replyPhone === 'string' ? parsed.replyPhone : '',
+          options:
+            Array.isArray(parsed.options) && parsed.options.length > 0
+              ? parsed.options.slice(0, 4)
+              : DEFAULT_QUICK_REPLY_CONFIG.options,
+        };
+      }
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return DEFAULT_QUICK_REPLY_CONFIG;
+}
+
+export function saveWhatsAppQuickReplyConfig(config: WhatsAppQuickReplyConfig): void {
+  try {
+    localStorage.setItem(WA_QUICK_REPLY_CONFIG_KEY, JSON.stringify(config));
+  } catch {
+    // ignore storage errors
+  }
+}
+
 export function formatWhatsAppPhone(phone: string): string {
   const clean = (phone || '').replace(/[^0-9]/g, '');
   if (!clean) return '';
   return clean.startsWith('91') && clean.length > 10 ? clean : `91${clean}`;
 }
 
+export function isValidReplyPhone(phone: string): boolean {
+  const digits = (phone || '').replace(/[^0-9]/g, '');
+  return digits.length >= 10;
+}
+
+const NUMBER_EMOJIS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣'];
+
+/**
+ * Generates clean 1-tap WhatsApp Click-to-Reply links block (2 to 4 buttons).
+ * When the receiver taps any link in WhatsApp, their reply chat to the sender opens
+ * prefilled with their Branch Name, SOL ID, Staff Name, and selected confirmation status.
+ */
+export function buildQuickReplyLinksBlock(
+  staff: { name: string; position?: string; branch?: string; solId?: string },
+  config?: WhatsAppQuickReplyConfig | null
+): string {
+  if (!config || !config.enabled || !isValidReplyPhone(config.replyPhone)) {
+    return '';
+  }
+  const activeOptions = (config.options || []).filter(
+    (o) => o.label.trim() && o.replyText.trim()
+  );
+  if (activeOptions.length === 0) return '';
+
+  const fullReplyPhone = formatWhatsAppPhone(config.replyPhone);
+  const branchTag = [
+    staff.branch ? `${staff.branch}` : '',
+    staff.solId ? `SOL ${staff.solId}` : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const senderPrefix = branchTag
+    ? `${branchTag} (${staff.name})`
+    : staff.name || 'Branch Staff';
+
+  const lines = activeOptions.slice(0, 4).map((opt, idx) => {
+    const numEmoji = NUMBER_EMOJIS[idx] || `${idx + 1}.`;
+    const prefillPayload = `${senderPrefix}: ${opt.replyText.trim()}`;
+    const link = `https://wa.me/${fullReplyPhone}?text=${encodeURIComponent(prefillPayload)}`;
+    return `${numEmoji} *${opt.label.trim()}*\n${link}`;
+  });
+
+  return `\n\n👇 *तुरंत कन्फर्म / रिप्लाई करने के लिए नीचे लिंक पर क्लिक करें:*\n\n${lines.join('\n\n')}`;
+}
+
 export function composeWhatsAppMessage(
-  staff: { name: string; position?: string; branch?: string },
+  staff: { name: string; position?: string; branch?: string; solId?: string },
   messageBody: string,
-  includeGreeting = true
+  includeGreeting = true,
+  quickReplyConfig?: WhatsAppQuickReplyConfig | null
 ): string {
   const replaced = (messageBody || '')
     .trim()
@@ -167,9 +305,12 @@ export function composeWhatsAppMessage(
     .replace(/\{शाखा\}|\{branch\}/gi, staff.branch || '')
     .replace(/\{पद\}|\{position\}/gi, staff.position || '');
 
-  if (!includeGreeting) return replaced;
-  const greeting = `नमस्ते ${staff.name} जी (${staff.position ? `${staff.position}, ` : ''}${staff.branch || ''} शाखा),\n\n`;
-  return `${greeting}${replaced}`;
+  const greeting = includeGreeting
+    ? `नमस्ते ${staff.name} जी (${staff.position ? `${staff.position}, ` : ''}${staff.branch || ''} शाखा),\n\n`
+    : '';
+  const quickReplyBlock = buildQuickReplyLinksBlock(staff, quickReplyConfig);
+
+  return `${greeting}${replaced}${quickReplyBlock}`;
 }
 
 export function isAndroidDevice(): boolean {

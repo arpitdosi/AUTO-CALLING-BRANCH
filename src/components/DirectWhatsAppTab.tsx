@@ -22,6 +22,9 @@ import {
   BookmarkPlus,
   Check,
   X,
+  Reply,
+  Eye,
+  AlertCircle,
 } from 'lucide-react';
 import { BHAVNAGAR_REGIONAL_STAFF, RegionalEmployee } from '../data/bhavnagarStaff';
 import { BranchManager, StaffLeaveEntry, CustomWorkRole, BranchRoleAssignment } from '../types';
@@ -33,19 +36,24 @@ import {
   getAssignmentsForStaff,
 } from '../utils/storage';
 import {
+  QUICK_REPLY_PRESETS,
   WhatsAppAppMode,
   WhatsAppAttachment,
+  WhatsAppQuickReplyConfig,
   WhatsAppTemplate,
   composeWhatsAppMessage,
+  isValidReplyPhone,
   loadActiveWhatsAppAttachmentId,
   loadWhatsAppAppMode,
   loadWhatsAppAttachments,
+  loadWhatsAppQuickReplyConfig,
   loadWhatsAppTemplates,
   openWhatsAppChat,
   processImageFileToAttachment,
   saveActiveWhatsAppAttachmentId,
   saveWhatsAppAppMode,
   saveWhatsAppAttachments,
+  saveWhatsAppQuickReplyConfig,
   saveWhatsAppTemplates,
   sendWhatsAppWithAttachment,
 } from '../utils/whatsapp';
@@ -114,6 +122,77 @@ export const DirectWhatsAppTab: React.FC<DirectWhatsAppTabProps> = ({
   );
   const [isUploadingImage, setIsUploadingImage] = useState<boolean>(false);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
+
+  // 4. Option A: 1-Tap Click-to-Reply Links (2 to 4 customizable buttons)
+  const [quickReplyConfig, setQuickReplyConfig] = useState<WhatsAppQuickReplyConfig>(() =>
+    loadWhatsAppQuickReplyConfig()
+  );
+  const [showQuickReplyPreview, setShowQuickReplyPreview] = useState<boolean>(false);
+
+  const updateQuickReplyConfig = (next: WhatsAppQuickReplyConfig) => {
+    setQuickReplyConfig(next);
+    saveWhatsAppQuickReplyConfig(next);
+  };
+
+  const handleToggleQuickReply = () => {
+    const nextEnabled = !quickReplyConfig.enabled;
+    updateQuickReplyConfig({ ...quickReplyConfig, enabled: nextEnabled });
+    if (nextEnabled) {
+      showToast(
+        isValidReplyPhone(quickReplyConfig.replyPhone)
+          ? '↩️ 1-टैप रिप्लाई बटन चालू — अब हर मैसेज में क्लिकेबल कन्फर्मेशन लिंक जुड़ेंगे!'
+          : '↩️ 1-टैप रिप्लाई चालू — कृपया नीचे अपना 10 अंकों का WhatsApp नंबर दर्ज करें।'
+      );
+    } else {
+      showToast('↩️ 1-टैप रिप्लाई बटन बंद किए गए।');
+    }
+  };
+
+  const handleApplyQuickReplyPreset = (presetId: string) => {
+    const preset = QUICK_REPLY_PRESETS.find((p) => p.id === presetId);
+    if (!preset) return;
+    updateQuickReplyConfig({
+      ...quickReplyConfig,
+      enabled: true,
+      options: preset.options.map((o) => ({ ...o })),
+    });
+    showToast(`✅ "${preset.title}" रिप्लाई बटन सेट लोड हो गया!`);
+  };
+
+  const handleUpdateQuickReplyOption = (
+    idx: number,
+    field: 'label' | 'replyText',
+    value: string
+  ) => {
+    const updated = quickReplyConfig.options.map((opt, i) =>
+      i === idx ? { ...opt, [field]: value } : opt
+    );
+    updateQuickReplyConfig({ ...quickReplyConfig, options: updated });
+  };
+
+  const handleAddQuickReplyOption = () => {
+    if (quickReplyConfig.options.length >= 4) return;
+    const nextNum = quickReplyConfig.options.length + 1;
+    updateQuickReplyConfig({
+      ...quickReplyConfig,
+      options: [
+        ...quickReplyConfig.options,
+        {
+          id: `qr_custom_${Date.now().toString(36)}`,
+          label: `📌 विकल्प ${nextNum}`,
+          replyText: `विकल्प ${nextNum} कन्फर्म`,
+        },
+      ],
+    });
+  };
+
+  const handleRemoveQuickReplyOption = (idx: number) => {
+    if (quickReplyConfig.options.length <= 2) return;
+    updateQuickReplyConfig({
+      ...quickReplyConfig,
+      options: quickReplyConfig.options.filter((_, i) => i !== idx),
+    });
+  };
 
   // Message composer state
   const [messageBody, setMessageBody] = useState<string>(
@@ -328,12 +407,22 @@ export const DirectWhatsAppTab: React.FC<DirectWhatsAppTabProps> = ({
     showToast(customToast || `💬 ${staff.name} (${staff.branch}) के लिए ${appLabel} खोला गया!`);
   };
 
-  // 1-tap Send Handler (handles WhatsApp vs WA Business + Auto Image Attachment)
+  // 1-tap Send Handler (handles WhatsApp vs WA Business + Auto Image Attachment + 1-Tap Quick Reply Links)
   const handleDirectSendToStaff = async (
     staff: RegionalEmployee,
     preferDirectChat = false
   ) => {
-    const finalText = composeWhatsAppMessage(staff, messageBody, includeGreeting);
+    if (quickReplyConfig.enabled && !isValidReplyPhone(quickReplyConfig.replyPhone)) {
+      showToast('⚠️ 1-टैप रिप्लाई लिंक चालू है — कृपया ऊपर अपना 10 अंकों का WhatsApp नंबर दर्ज करें (या बटन बंद करें)।');
+      return;
+    }
+
+    const finalText = composeWhatsAppMessage(
+      staff,
+      messageBody,
+      includeGreeting,
+      quickReplyConfig
+    );
     const appLabel = appMode === 'whatsapp_business' ? 'WhatsApp Business' : 'WhatsApp';
 
     if (activeAttachment) {
@@ -850,6 +939,185 @@ export const DirectWhatsAppTab: React.FC<DirectWhatsAppTabProps> = ({
               </div>
             )}
           </div>
+
+          {/* OPTION 4 (Option A): 1-Tap Click-to-Reply Links (2 to 4 Customizable Confirmation Buttons) */}
+          <div className="pt-2.5 border-t border-slate-800/90 space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center space-x-1.5 flex-wrap gap-y-1">
+                <Reply className="w-4 h-4 text-sky-400 shrink-0" />
+                <span className="text-xs font-black text-sky-300">
+                  4️⃣ 1-टैप रिप्लाई बटन (Click-to-Reply Links — 2 से 4 विकल्प):
+                </span>
+                {quickReplyConfig.enabled && isValidReplyPhone(quickReplyConfig.replyPhone) && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-sky-500/20 text-sky-200 border border-sky-400/40">
+                    ✓ {quickReplyConfig.options.length} बटन चालू
+                  </span>
+                )}
+                {quickReplyConfig.enabled && !isValidReplyPhone(quickReplyConfig.replyPhone) && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500/20 text-amber-300 border border-amber-400/40 flex items-center space-x-1">
+                    <AlertCircle className="w-3 h-3" />
+                    <span>अपना नंबर डालें</span>
+                  </span>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={handleToggleQuickReply}
+                className={`px-3 py-1.5 rounded-xl text-xs font-black border transition-all flex items-center space-x-1.5 ${
+                  quickReplyConfig.enabled
+                    ? 'bg-sky-600 text-white border-sky-300 shadow-md'
+                    : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-sky-500/60 hover:text-white'
+                }`}
+              >
+                <Reply className="w-3.5 h-3.5" />
+                <span>{quickReplyConfig.enabled ? '✓ रिप्लाई बटन चालू हैं' : '+ रिप्लाई बटन जोड़ें'}</span>
+              </button>
+            </div>
+
+            {!quickReplyConfig.enabled ? (
+              <p className="text-[11px] text-slate-400">
+                इसे चालू करने पर मैसेज के नीचे 2 से 4 क्लिकेबल लिंक जुड़ जाएंगे — स्टाफ लिंक दबाते ही आपकी चैट में शाखा के नाम के साथ तुरंत कन्फर्मेशन रिप्लाई भेज सकेगा (100% फ्री)।
+              </p>
+            ) : (
+              <div className="bg-slate-900/95 border border-sky-500/40 rounded-2xl p-3 sm:p-3.5 space-y-3">
+                {/* Sender Reply Number + Preset Chips */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 items-end">
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-sky-200 flex items-center space-x-1">
+                      <Phone className="w-3 h-3 text-sky-400" />
+                      <span>आपका WhatsApp नंबर (जिस पर स्टाफ का रिप्लाई आए):</span>
+                    </label>
+                    <input
+                      type="tel"
+                      inputMode="numeric"
+                      value={quickReplyConfig.replyPhone}
+                      onChange={(e) =>
+                        updateQuickReplyConfig({
+                          ...quickReplyConfig,
+                          replyPhone: e.target.value.replace(/[^0-9+ ]/g, '').slice(0, 15),
+                        })
+                      }
+                      placeholder="अपना 10 अंकों का मोबाइल नंबर डालें (उदा. 9825012345)"
+                      className={`w-full px-3 py-2 bg-slate-950 rounded-xl text-xs font-mono text-white placeholder-slate-500 focus:outline-none border ${
+                        isValidReplyPhone(quickReplyConfig.replyPhone)
+                          ? 'border-emerald-500/50 focus:border-emerald-400'
+                          : 'border-amber-500/70 focus:border-amber-400'
+                      }`}
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <span className="text-[11px] font-bold text-slate-300 block">
+                      रेडीमेड बटन सेट (1 क्लिक में बदलें):
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {QUICK_REPLY_PRESETS.map((preset) => (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() => handleApplyQuickReplyPreset(preset.id)}
+                          className="px-2 py-1 rounded-lg text-[10px] font-bold bg-slate-950 hover:bg-sky-900/50 text-sky-200 border border-slate-700 hover:border-sky-400/60 transition-colors"
+                        >
+                          {preset.title}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Editable 2 to 4 Reply Buttons */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-bold text-slate-300">
+                      रिप्लाई विकल्प ({quickReplyConfig.options.length}/4 बटन — नाम व रिप्लाई टेक्स्ट बदल सकते हैं):
+                    </span>
+                    <div className="flex items-center space-x-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setShowQuickReplyPreview(!showQuickReplyPreview)}
+                        className="px-2 py-1 rounded-lg text-[10px] font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center space-x-1"
+                      >
+                        <Eye className="w-3 h-3 text-sky-400" />
+                        <span>{showQuickReplyPreview ? 'प्रिव्यू छुपाएं' : 'मैसेज प्रिव्यू'}</span>
+                      </button>
+                      {quickReplyConfig.options.length < 4 && (
+                        <button
+                          type="button"
+                          onClick={handleAddQuickReplyOption}
+                          className="px-2.5 py-1 rounded-lg text-[10px] font-black bg-sky-600/30 hover:bg-sky-600/50 text-sky-200 border border-sky-400/50 flex items-center space-x-1"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>बटन जोड़ें ({quickReplyConfig.options.length + 1}/4)</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {quickReplyConfig.options.map((opt, idx) => (
+                      <div
+                        key={opt.id}
+                        className="bg-slate-950/90 border border-slate-800 rounded-xl p-2 space-y-1.5"
+                      >
+                        <div className="flex items-center justify-between gap-1.5">
+                          <span className="text-[11px] font-black text-sky-300">
+                            {['1️⃣', '2️⃣', '3️⃣', '4️⃣'][idx]} बटन #{idx + 1}
+                          </span>
+                          {quickReplyConfig.options.length > 2 && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveQuickReplyOption(idx)}
+                              className="p-0.5 text-slate-500 hover:text-rose-400"
+                              title="यह बटन हटाएं"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                        <input
+                          type="text"
+                          value={opt.label}
+                          onChange={(e) => handleUpdateQuickReplyOption(idx, 'label', e.target.value)}
+                          placeholder="बटन का शीर्षक (स्टाफ को दिखेगा)..."
+                          className="w-full px-2.5 py-1 bg-slate-900 border border-slate-700 rounded-lg text-[11px] font-bold text-white placeholder-slate-500 focus:outline-none focus:border-sky-400"
+                        />
+                        <input
+                          type="text"
+                          value={opt.replyText}
+                          onChange={(e) => handleUpdateQuickReplyOption(idx, 'replyText', e.target.value)}
+                          placeholder="क्लिक करने पर जो रिप्लाई वापस आएगा..."
+                          className="w-full px-2.5 py-1 bg-slate-900 border border-slate-800 rounded-lg text-[10px] text-emerald-300 placeholder-slate-500 focus:outline-none focus:border-emerald-400"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Live WhatsApp Message Preview */}
+                {showQuickReplyPreview && (
+                  <div className="bg-emerald-950/30 border border-emerald-500/30 rounded-xl p-3 space-y-1">
+                    <div className="text-[10px] font-black text-emerald-300 uppercase tracking-wider">
+                      📱 WhatsApp में मैसेज ऐसा दिखेगा (उदाहरण प्रिव्यू):
+                    </div>
+                    <pre className="text-[11px] text-slate-200 whitespace-pre-wrap break-all font-sans leading-relaxed">
+                      {composeWhatsAppMessage(
+                        {
+                          name: filteredStaff[0]?.name || 'रमेश पटेल',
+                          position: filteredStaff[0]?.position || 'BRANCH HEAD',
+                          branch: filteredStaff[0]?.branch || 'SIHOR',
+                          solId: filteredStaff[0]?.solId || '1234',
+                        },
+                        messageBody,
+                        includeGreeting,
+                        quickReplyConfig
+                      )}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1212,10 +1480,12 @@ export const DirectWhatsAppTab: React.FC<DirectWhatsAppTabProps> = ({
         initialMessage={messageBody}
         initialAppMode={appMode}
         initialAttachment={activeAttachment}
+        initialQuickReplyConfig={quickReplyConfig}
         leaveEntry={modalStaff ? getStaffLeaveEntry(modalStaff, staffLeaves, today) : null}
         onMarkSent={(s) => markStaffSent(s)}
         onTemplatesChanged={() => setTemplates(loadWhatsAppTemplates())}
         onAppModeChanged={(mode) => setAppMode(mode)}
+        onQuickReplyConfigChanged={(cfg) => setQuickReplyConfig(cfg)}
       />
     </div>
   );

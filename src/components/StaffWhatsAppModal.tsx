@@ -15,25 +15,31 @@ import {
   Image as ImageIcon,
   Paperclip,
   BookmarkPlus,
+  Reply,
 } from 'lucide-react';
 import { RegionalEmployee } from '../data/bhavnagarStaff';
 import { StaffLeaveEntry } from '../types';
 import {
   DEFAULT_WHATSAPP_TEMPLATES,
+  QUICK_REPLY_PRESETS,
   WhatsAppAppMode,
   WhatsAppAttachment,
+  WhatsAppQuickReplyConfig,
   WhatsAppTemplate,
   buildWhatsAppAppUrl,
   composeWhatsAppMessage,
+  isValidReplyPhone,
   loadActiveWhatsAppAttachmentId,
   loadWhatsAppAppMode,
   loadWhatsAppAttachments,
+  loadWhatsAppQuickReplyConfig,
   loadWhatsAppTemplates,
   openWhatsAppChat,
   processImageFileToAttachment,
   saveActiveWhatsAppAttachmentId,
   saveWhatsAppAppMode,
   saveWhatsAppAttachments,
+  saveWhatsAppQuickReplyConfig,
   saveWhatsAppTemplates,
   sendWhatsAppWithAttachment,
 } from '../utils/whatsapp';
@@ -58,10 +64,12 @@ interface StaffWhatsAppModalProps {
   initialMessage?: string;
   initialAppMode?: WhatsAppAppMode;
   initialAttachment?: WhatsAppAttachment | null;
+  initialQuickReplyConfig?: WhatsAppQuickReplyConfig;
   leaveEntry?: StaffLeaveEntry | null;
   onMarkSent?: (staff: RegionalEmployee) => void;
   onTemplatesChanged?: () => void;
   onAppModeChanged?: (mode: WhatsAppAppMode) => void;
+  onQuickReplyConfigChanged?: (cfg: WhatsAppQuickReplyConfig) => void;
 }
 
 export const StaffWhatsAppModal: React.FC<StaffWhatsAppModalProps> = ({
@@ -71,16 +79,21 @@ export const StaffWhatsAppModal: React.FC<StaffWhatsAppModalProps> = ({
   initialMessage,
   initialAppMode,
   initialAttachment,
+  initialQuickReplyConfig,
   leaveEntry,
   onMarkSent,
   onTemplatesChanged,
   onAppModeChanged,
+  onQuickReplyConfigChanged,
 }) => {
   const [appMode, setAppMode] = useState<WhatsAppAppMode>(() => initialAppMode || loadWhatsAppAppMode());
   const [templates, setTemplates] = useState<WhatsAppTemplate[]>(() => loadWhatsAppTemplates());
   const [attachments, setAttachments] = useState<WhatsAppAttachment[]>(() => loadWhatsAppAttachments());
   const [activeAttachmentId, setActiveAttachmentId] = useState<string | null>(() =>
     initialAttachment ? initialAttachment.id : loadActiveWhatsAppAttachmentId()
+  );
+  const [quickReplyConfig, setQuickReplyConfig] = useState<WhatsAppQuickReplyConfig>(
+    () => initialQuickReplyConfig || loadWhatsAppQuickReplyConfig()
   );
 
   const [message, setMessage] = useState<string>(DEFAULT_WHATSAPP_TEMPLATES[0].text);
@@ -102,6 +115,7 @@ export const StaffWhatsAppModal: React.FC<StaffWhatsAppModalProps> = ({
       setTemplates(loadedTemplates);
       setAttachments(loadedAttachments);
       setAppMode(initialAppMode || loadWhatsAppAppMode());
+      setQuickReplyConfig(initialQuickReplyConfig || loadWhatsAppQuickReplyConfig());
       setActiveAttachmentId(
         initialAttachment !== undefined
           ? initialAttachment?.id || null
@@ -117,12 +131,18 @@ export const StaffWhatsAppModal: React.FC<StaffWhatsAppModalProps> = ({
       setShowSaveTemplate(false);
       setNewTemplateTitle('');
     }
-  }, [isOpen, staff, initialMessage, initialAppMode, initialAttachment]);
+  }, [isOpen, staff, initialMessage, initialAppMode, initialAttachment, initialQuickReplyConfig]);
 
   if (!isOpen || !staff) return null;
 
   const activeAttachment = attachments.find((a) => a.id === activeAttachmentId) || null;
-  const previewText = composeWhatsAppMessage(staff, message, includeGreeting);
+  const previewText = composeWhatsAppMessage(staff, message, includeGreeting, quickReplyConfig);
+
+  const updateQuickReply = (next: WhatsAppQuickReplyConfig) => {
+    setQuickReplyConfig(next);
+    saveWhatsAppQuickReplyConfig(next);
+    if (onQuickReplyConfigChanged) onQuickReplyConfigChanged(next);
+  };
 
   const handleModeChange = (mode: WhatsAppAppMode) => {
     setAppMode(mode);
@@ -193,6 +213,10 @@ export const StaffWhatsAppModal: React.FC<StaffWhatsAppModalProps> = ({
 
   const handleSend = async (preferDirectChat = false) => {
     if (isSending) return;
+    if (quickReplyConfig.enabled && !isValidReplyPhone(quickReplyConfig.replyPhone)) {
+      setStatusNote('⚠️ 1-टैप रिप्लाई बटन के लिए पहले नीचे अपना 10 अंकों का WhatsApp नंबर दर्ज करें।');
+      return;
+    }
     setIsSending(true);
     try {
       if (activeAttachment) {
@@ -506,6 +530,79 @@ export const StaffWhatsAppModal: React.FC<StaffWhatsAppModalProps> = ({
                     </span>
                   </button>
                 ))}
+              </div>
+            )}
+          </div>
+
+          {/* 4. 1-Tap Quick Reply Links */}
+          <div className="bg-slate-950/70 border border-sky-500/30 rounded-xl p-3 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-bold text-sky-300 flex items-center space-x-1.5">
+                <Reply className="w-3.5 h-3.5" />
+                <span>4️⃣ 1-टैप रिप्लाई बटन ({quickReplyConfig.options.length} विकल्प):</span>
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  updateQuickReply({ ...quickReplyConfig, enabled: !quickReplyConfig.enabled })
+                }
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-black border transition-colors ${
+                  quickReplyConfig.enabled
+                    ? 'bg-sky-600 text-white border-sky-300'
+                    : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-white'
+                }`}
+              >
+                {quickReplyConfig.enabled ? '✓ चालू (ON)' : 'बंद (OFF)'}
+              </button>
+            </div>
+
+            {quickReplyConfig.enabled && (
+              <div className="space-y-2 pt-1">
+                <input
+                  type="tel"
+                  inputMode="numeric"
+                  value={quickReplyConfig.replyPhone}
+                  onChange={(e) =>
+                    updateQuickReply({
+                      ...quickReplyConfig,
+                      replyPhone: e.target.value.replace(/[^0-9+ ]/g, '').slice(0, 15),
+                    })
+                  }
+                  placeholder="आपका 10 अंकों का WhatsApp नंबर (रिप्लाई पाने हेतु)..."
+                  className={`w-full px-2.5 py-1.5 bg-slate-900 rounded-lg text-xs font-mono text-white placeholder-slate-500 focus:outline-none border ${
+                    isValidReplyPhone(quickReplyConfig.replyPhone)
+                      ? 'border-emerald-500/50'
+                      : 'border-amber-500/70'
+                  }`}
+                />
+                <div className="flex flex-wrap gap-1">
+                  {QUICK_REPLY_PRESETS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      onClick={() =>
+                        updateQuickReply({
+                          ...quickReplyConfig,
+                          enabled: true,
+                          options: preset.options.map((o) => ({ ...o })),
+                        })
+                      }
+                      className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-900 hover:bg-sky-900/50 text-sky-200 border border-slate-700"
+                    >
+                      {preset.title}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {quickReplyConfig.options.map((opt, idx) => (
+                    <span
+                      key={opt.id}
+                      className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-sky-500/15 text-sky-200 border border-sky-500/30"
+                    >
+                      {['1️⃣', '2️⃣', '3️⃣', '4️⃣'][idx]} {opt.label}
+                    </span>
+                  ))}
+                </div>
               </div>
             )}
           </div>
