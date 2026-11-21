@@ -22,6 +22,7 @@ import {
 import { BranchManager, CallLogEntry, CallOutcome, CustomWorkRole, BranchRoleAssignment } from '../types';
 import { CampaignCallingItem } from '../utils/staffMatcher';
 import { MarkWorkTargetBranch } from './MarkWorkRoleModal';
+import { openWhatsAppChat } from '../utils/whatsapp';
 
 interface ManagerCardProps {
   manager: BranchManager;
@@ -167,12 +168,8 @@ export const ManagerCard: React.FC<ManagerCardProps> = ({
   };
 
   const openWhatsApp = () => {
-    const cleanNumber = activePhone.replace(/[^0-9]/g, '');
-    const fullNumber = cleanNumber.startsWith('91') ? cleanNumber : `91${cleanNumber}`;
-    const text = encodeURIComponent(
-      `Respected ${activeName} Ji (${manager.branch} Branch, Sol: ${manager.solId}, Position: ${activeRole}),\n\n${whatsappTemplate}`
-    );
-    window.open(`https://wa.me/${fullNumber}?text=${text}`, '_blank');
+    const text = `Respected ${activeName} Ji (${manager.branch} Branch, Sol: ${manager.solId}, Position: ${activeRole}),\n\n${whatsappTemplate}`;
+    openWhatsAppChat(activePhone, text);
   };
 
   return (

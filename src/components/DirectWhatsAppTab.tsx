@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import {
   MessageSquare,
   Search,
@@ -13,6 +13,15 @@ import {
   RotateCcw,
   Filter,
   Target,
+  Briefcase,
+  Smartphone,
+  Plus,
+  Trash2,
+  Image as ImageIcon,
+  Paperclip,
+  BookmarkPlus,
+  Check,
+  X,
 } from 'lucide-react';
 import { BHAVNAGAR_REGIONAL_STAFF, RegionalEmployee } from '../data/bhavnagarStaff';
 import { BranchManager, StaffLeaveEntry, CustomWorkRole, BranchRoleAssignment } from '../types';
@@ -24,10 +33,23 @@ import {
   getAssignmentsForStaff,
 } from '../utils/storage';
 import {
-  StaffWhatsAppModal,
-  WHATSAPP_QUICK_TEMPLATES,
-  buildWhatsAppLink,
-} from './StaffWhatsAppModal';
+  WhatsAppAppMode,
+  WhatsAppAttachment,
+  WhatsAppTemplate,
+  composeWhatsAppMessage,
+  loadActiveWhatsAppAttachmentId,
+  loadWhatsAppAppMode,
+  loadWhatsAppAttachments,
+  loadWhatsAppTemplates,
+  openWhatsAppChat,
+  processImageFileToAttachment,
+  saveActiveWhatsAppAttachmentId,
+  saveWhatsAppAppMode,
+  saveWhatsAppAttachments,
+  saveWhatsAppTemplates,
+  sendWhatsAppWithAttachment,
+} from '../utils/whatsapp';
+import { StaffWhatsAppModal } from './StaffWhatsAppModal';
 
 interface DirectWhatsAppTabProps {
   managers: BranchManager[];
@@ -71,8 +93,32 @@ export const DirectWhatsAppTab: React.FC<DirectWhatsAppTabProps> = ({
 }) => {
   const today = getTodayKey();
 
+  // 1. WhatsApp vs WhatsApp Business App Mode (persisted globally)
+  const [appMode, setAppMode] = useState<WhatsAppAppMode>(() => loadWhatsAppAppMode());
+
+  // 2. Readymade Templates (Built-in + User Custom Templates)
+  const [templates, setTemplates] = useState<WhatsAppTemplate[]>(() => loadWhatsAppTemplates());
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>(
+    () => loadWhatsAppTemplates()[0]?.id || 'callback'
+  );
+  const [showTemplateEditor, setShowTemplateEditor] = useState<boolean>(false);
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
+  const [tplTitleInput, setTplTitleInput] = useState<string>('');
+  const [tplBodyInput, setTplBodyInput] = useState<string>('');
+  const [tplLinkCurrentImage, setTplLinkCurrentImage] = useState<boolean>(true);
+
+  // 3. Auto Image Attachment Library & Active Selection
+  const [attachments, setAttachments] = useState<WhatsAppAttachment[]>(() => loadWhatsAppAttachments());
+  const [activeAttachmentId, setActiveAttachmentId] = useState<string | null>(() =>
+    loadActiveWhatsAppAttachmentId()
+  );
+  const [isUploadingImage, setIsUploadingImage] = useState<boolean>(false);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
+
   // Message composer state
-  const [messageBody, setMessageBody] = useState<string>(WHATSAPP_QUICK_TEMPLATES[0].text);
+  const [messageBody, setMessageBody] = useState<string>(
+    () => loadWhatsAppTemplates()[0]?.text || ''
+  );
   const [includeGreeting, setIncludeGreeting] = useState<boolean>(true);
 
   // Filters
@@ -89,6 +135,153 @@ export const DirectWhatsAppTab: React.FC<DirectWhatsAppTabProps> = ({
 
   // Modal for customizing message for a single staff member
   const [modalStaff, setModalStaff] = useState<RegionalEmployee | null>(null);
+
+  const activeAttachment = useMemo(
+    () => attachments.find((a) => a.id === activeAttachmentId) || null,
+    [attachments, activeAttachmentId]
+  );
+
+  // Switch WhatsApp vs WhatsApp Business
+  const handleSwitchAppMode = (mode: WhatsAppAppMode) => {
+    setAppMode(mode);
+    saveWhatsAppAppMode(mode);
+    showToast(
+      mode === 'whatsapp_business'
+        ? '💼 WhatsApp Business मोड चालू — अब मैसेज WhatsApp Business से जाएंगे!'
+        : '📱 सामान्य WhatsApp मोड चालू — अब मैसेज WhatsApp से जाएंगे!'
+    );
+  };
+
+  // Select Active Attachment
+  const handleSelectAttachment = (id: string | null) => {
+    setActiveAttachmentId(id);
+    saveActiveWhatsAppAttachmentId(id);
+  };
+
+  // Upload Image from Gallery once and save in library
+  const handleUploadImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploadingImage(true);
+    try {
+      const att = await processImageFileToAttachment(file);
+      const updated = [att, ...attachments].slice(0, 8);
+      setAttachments(updated);
+      const savedOk = saveWhatsAppAttachments(updated);
+      handleSelectAttachment(att.id);
+      showToast(
+        savedOk
+          ? `🖼️ इमेज "${att.name}" (${att.sizeKB} KB) ऑटो-अटैच के लिए सेव हो गई!`
+          : `🖼️ इमेज "${att.name}" लोड हो गई (पुरानी इमेज हटाकर स्पेस बनाया गया)।`
+      );
+    } catch {
+      showToast('⚠️ इमेज लोड नहीं हो सकी। कृपया मान्य JPG/PNG इमेज चुनें।');
+    } finally {
+      setIsUploadingImage(false);
+      if (imageInputRef.current) imageInputRef.current.value = '';
+    }
+  };
+
+  const handleDeleteAttachment = (id: string) => {
+    const updated = attachments.filter((a) => a.id !== id);
+    setAttachments(updated);
+    saveWhatsAppAttachments(updated);
+    if (activeAttachmentId === id) {
+      handleSelectAttachment(null);
+    }
+    // Unlink from any templates referencing it
+    const updatedTemplates = templates.map((t) =>
+      t.attachmentId === id ? { ...t, attachmentId: undefined } : t
+    );
+    setTemplates(updatedTemplates);
+    saveWhatsAppTemplates(updatedTemplates);
+    showToast('🗑️ सेव की गई इमेज हटा दी गई।');
+  };
+
+  // Select a Readymade Template (auto-loads its message + linked image if any)
+  const handleSelectTemplate = (tpl: WhatsAppTemplate) => {
+    setSelectedTemplateId(tpl.id);
+    setMessageBody(tpl.text);
+    if (tpl.attachmentId) {
+      const exists = attachments.some((a) => a.id === tpl.attachmentId);
+      if (exists) {
+        handleSelectAttachment(tpl.attachmentId);
+      }
+    }
+  };
+
+  // Open Template Creator / Editor
+  const openCreateTemplate = (prefillCurrentText = false) => {
+    setEditingTemplateId(null);
+    setTplTitleInput('');
+    setTplBodyInput(prefillCurrentText ? messageBody : '');
+    setTplLinkCurrentImage(!!activeAttachment);
+    setShowTemplateEditor(true);
+  };
+
+  const openEditTemplate = (tpl: WhatsAppTemplate) => {
+    setEditingTemplateId(tpl.id);
+    setTplTitleInput(tpl.label.replace(/^⭐\s*/, ''));
+    setTplBodyInput(tpl.text);
+    setTplLinkCurrentImage(!!tpl.attachmentId || !!activeAttachment);
+    setShowTemplateEditor(true);
+  };
+
+  const handleSaveTemplate = () => {
+    const cleanTitle = tplTitleInput.trim();
+    const cleanText = tplBodyInput.trim();
+    if (!cleanTitle || !cleanText) {
+      showToast('⚠️ कृपया टेम्पलेट का नाम और संदेश दोनों लिखें।');
+      return;
+    }
+
+    const linkedAttId = tplLinkCurrentImage && activeAttachment ? activeAttachment.id : undefined;
+
+    if (editingTemplateId) {
+      const updated = templates.map((t) =>
+        t.id === editingTemplateId
+          ? {
+              ...t,
+              label: t.isDefault ? cleanTitle : `⭐ ${cleanTitle}`,
+              text: cleanText,
+              attachmentId: linkedAttId,
+            }
+          : t
+      );
+      setTemplates(updated);
+      saveWhatsAppTemplates(updated);
+      setMessageBody(cleanText);
+      showToast(`✅ टेम्पलेट "${cleanTitle}" अपडेट हो गया!`);
+    } else {
+      const newTpl: WhatsAppTemplate = {
+        id: `tpl_${Date.now().toString(36)}`,
+        label: `⭐ ${cleanTitle}`,
+        text: cleanText,
+        attachmentId: linkedAttId,
+        isDefault: false,
+        createdAt: Date.now(),
+      };
+      const updated = [newTpl, ...templates];
+      setTemplates(updated);
+      saveWhatsAppTemplates(updated);
+      setSelectedTemplateId(newTpl.id);
+      setMessageBody(cleanText);
+      showToast(`✅ नया रेडीमेड टेम्पलेट "${cleanTitle}" सेव हो गया!`);
+    }
+
+    setShowTemplateEditor(false);
+    setEditingTemplateId(null);
+    setTplTitleInput('');
+    setTplBodyInput('');
+  };
+
+  const handleDeleteTemplate = (tpl: WhatsAppTemplate) => {
+    if (tpl.isDefault) return;
+    const updated = templates.filter((t) => t.id !== tpl.id);
+    setTemplates(updated);
+    saveWhatsAppTemplates(updated);
+    showToast(`🗑️ टेम्पलेट "${tpl.label}" हटा दिया गया।`);
+  };
 
   // All non-RO branch staff sorted alphabetically by Branch then Branch Head first then Name
   const allBranchStaff = useMemo(() => {
@@ -126,12 +319,49 @@ export const DirectWhatsAppTab: React.FC<DirectWhatsAppTabProps> = ({
     return Array.from(set).sort();
   }, [allBranchStaff]);
 
-  const markStaffSent = (staff: RegionalEmployee) => {
+  const markStaffSent = (staff: RegionalEmployee, customToast?: string) => {
     const key = getStaffLeaveKey(staff);
     const updated = { ...sentMap, [key]: Date.now() };
     setSentMap(updated);
     saveTodaySentMap(today, updated);
-    showToast(`💬 ${staff.name} (${staff.branch}) के लिए WhatsApp खोला गया!`);
+    const appLabel = appMode === 'whatsapp_business' ? 'WhatsApp Business' : 'WhatsApp';
+    showToast(customToast || `💬 ${staff.name} (${staff.branch}) के लिए ${appLabel} खोला गया!`);
+  };
+
+  // 1-tap Send Handler (handles WhatsApp vs WA Business + Auto Image Attachment)
+  const handleDirectSendToStaff = async (
+    staff: RegionalEmployee,
+    preferDirectChat = false
+  ) => {
+    const finalText = composeWhatsAppMessage(staff, messageBody, includeGreeting);
+    const appLabel = appMode === 'whatsapp_business' ? 'WhatsApp Business' : 'WhatsApp';
+
+    if (activeAttachment) {
+      const result = await sendWhatsAppWithAttachment(
+        staff,
+        finalText,
+        activeAttachment,
+        appMode,
+        preferDirectChat
+      );
+      if (result.method === 'cancelled') return;
+      if (result.method === 'native_share') {
+        markStaffSent(
+          staff,
+          `📎 ${staff.name} के लिए इमेज + मैसेज तैयार — ${appLabel} चुनें!`
+        );
+      } else {
+        markStaffSent(
+          staff,
+          result.imageCopied
+            ? `📎 इमेज कॉपी हो गई + ${staff.name} की ${appLabel} चैट खुली — बस Paste करें!`
+            : `💬 ${staff.name} की ${appLabel} चैट खोली गई!`
+        );
+      }
+    } else {
+      openWhatsAppChat(staff.phone, finalText, appMode);
+      markStaffSent(staff);
+    }
   };
 
   const resetSentTracking = () => {
@@ -204,23 +434,39 @@ export const DirectWhatsAppTab: React.FC<DirectWhatsAppTabProps> = ({
   return (
     <div className="space-y-4">
       {/* Top Hero & Message Composer */}
-      <div className="bg-gradient-to-r from-emerald-950 via-teal-950 to-slate-900 border border-emerald-600/40 rounded-3xl p-4 sm:p-6 shadow-xl space-y-4">
+      <div
+        className={`rounded-3xl p-4 sm:p-6 shadow-xl space-y-4 border ${
+          appMode === 'whatsapp_business'
+            ? 'bg-gradient-to-r from-teal-950 via-cyan-950 to-slate-900 border-cyan-600/40'
+            : 'bg-gradient-to-r from-emerald-950 via-teal-950 to-slate-900 border-emerald-600/40'
+        }`}
+      >
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div className="space-y-1">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 uppercase tracking-wider">
-                Direct WhatsApp Hub
+              <span
+                className={`px-2.5 py-0.5 rounded-full text-[11px] font-black border uppercase tracking-wider ${
+                  appMode === 'whatsapp_business'
+                    ? 'bg-cyan-500/20 text-cyan-300 border-cyan-400/40'
+                    : 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40'
+                }`}
+              >
+                {appMode === 'whatsapp_business' ? '💼 WhatsApp Business Hub' : '💬 Direct WhatsApp Hub'}
               </span>
               <span className="text-xs text-emerald-200">
                 {allBranchStaff.length} शाखा स्टाफ • 🚫 RO स्टाफ बाहर
               </span>
             </div>
             <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center space-x-2">
-              <MessageSquare className="w-6 h-6 text-emerald-400" />
-              <span>डायरेक्ट WhatsApp संदेश (Direct Staff WhatsApp)</span>
+              {appMode === 'whatsapp_business' ? (
+                <Briefcase className="w-6 h-6 text-cyan-400" />
+              ) : (
+                <MessageSquare className="w-6 h-6 text-emerald-400" />
+              )}
+              <span>डायरेक्ट WhatsApp & Business संदेश</span>
             </h2>
             <p className="text-xs sm:text-sm text-emerald-100/80 max-w-3xl">
-              यहाँ एक बार संदेश लिखें या टेम्पलेट चुनें और नीचे किसी भी स्टाफ पर <strong>'💬 भेजें'</strong> दबाकर सीधे उनके WhatsApp पर मैसेज भेजें।
+              <strong>WhatsApp</strong> या <strong>WhatsApp Business</strong> चुनें, अपने रेडीमेड टेम्पलेट बनाएं, और 1 बार इमेज अटैच करके बिना गैलरी खोले हर स्टाफ को तुरंत भेजें।
             </p>
           </div>
 
@@ -242,49 +488,368 @@ export const DirectWhatsAppTab: React.FC<DirectWhatsAppTabProps> = ({
           </div>
         </div>
 
-        {/* Common Message Composer Box */}
-        <div className="bg-slate-950/70 border border-emerald-500/30 rounded-2xl p-3.5 sm:p-4 space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-xs font-bold text-emerald-300 flex items-center space-x-1.5">
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>कॉमन संदेश टेम्पलेट (1 क्लिक में सभी के लिए तैयार):</span>
-            </span>
-            <label className="flex items-center space-x-1.5 text-[11px] text-slate-300 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={includeGreeting}
-                onChange={(e) => setIncludeGreeting(e.target.checked)}
-                className="accent-emerald-500 rounded"
-              />
-              <span>हर स्टाफ का नाम व शाखा जोड़ें (नमस्ते [नाम] जी...)</span>
-            </label>
+        {/* OPTION 1: WhatsApp vs WhatsApp Business Selector Bar */}
+        <div className="bg-slate-950/75 border border-slate-700/80 rounded-2xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+          <div className="space-y-0.5">
+            <div className="text-xs font-black text-white flex items-center space-x-1.5">
+              <span>1️⃣ ऐप चुनें (Send via WhatsApp or WhatsApp Business):</span>
+            </div>
+            <p className="text-[11px] text-slate-400">
+              Android मोबाइल में चुना गया ऐप (Personal या Business) सीधे खुलेगा। यह सेटिंग पूरे ऐप में सेव रहेगी।
+            </p>
           </div>
+
+          <div className="grid grid-cols-2 gap-1.5 bg-slate-900 p-1 rounded-xl border border-slate-800 shrink-0">
+            <button
+              type="button"
+              onClick={() => handleSwitchAppMode('whatsapp')}
+              className={`px-3.5 py-2 rounded-lg text-xs font-black flex items-center justify-center space-x-1.5 transition-all ${
+                appMode === 'whatsapp'
+                  ? 'bg-emerald-600 text-white shadow-md ring-1 ring-emerald-300/60'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Smartphone className="w-3.5 h-3.5" />
+              <span>WhatsApp</span>
+              {appMode === 'whatsapp' && <Check className="w-3.5 h-3.5" />}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleSwitchAppMode('whatsapp_business')}
+              className={`px-3.5 py-2 rounded-lg text-xs font-black flex items-center justify-center space-x-1.5 transition-all ${
+                appMode === 'whatsapp_business'
+                  ? 'bg-gradient-to-r from-teal-600 to-cyan-600 text-white shadow-md ring-1 ring-cyan-300/60'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Briefcase className="w-3.5 h-3.5" />
+              <span>WA Business</span>
+              {appMode === 'whatsapp_business' && <Check className="w-3.5 h-3.5" />}
+            </button>
+          </div>
+        </div>
+
+        {/* OPTION 2 & 3: Common Message Composer + Readymade Templates + Auto Image Attachment */}
+        <div className="bg-slate-950/75 border border-emerald-500/30 rounded-2xl p-3.5 sm:p-4 space-y-3.5">
+          {/* Option 2: Readymade Templates Header */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-xs font-black text-emerald-300 flex items-center space-x-1.5">
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>2️⃣ रेडीमेड टेम्पलेट्स (Readymade Templates):</span>
+            </span>
+            <div className="flex items-center flex-wrap gap-1.5">
+              <button
+                type="button"
+                onClick={() => openCreateTemplate(true)}
+                className="px-2.5 py-1 bg-blue-600/25 hover:bg-blue-600/40 text-blue-200 border border-blue-400/50 rounded-lg text-[11px] font-bold flex items-center space-x-1 transition-colors"
+                title="नीचे लिखा संदेश नए टेम्पलेट के रूप में सेव करें"
+              >
+                <BookmarkPlus className="w-3.5 h-3.5" />
+                <span>+ नया टेम्पलेट बनाएं</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Inline Readymade Template Creator / Editor Drawer */}
+          {showTemplateEditor && (
+            <div className="bg-slate-900 border-2 border-blue-500/50 rounded-2xl p-3.5 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-black text-blue-300">
+                  {editingTemplateId ? '✏️ टेम्पलेट एडिट करें' : '✨ नया रेडीमेड टेम्पलेट बनाएं'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowTemplateEditor(false);
+                    setEditingTemplateId(null);
+                  }}
+                  className="text-slate-400 hover:text-white p-1"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <input
+                type="text"
+                value={tplTitleInput}
+                onChange={(e) => setTplTitleInput(e.target.value)}
+                placeholder="टेम्पलेट का छोटा नाम (उदा. नया अकाउंट टारगेट, Gold Loan सर्कुलर, सुबह अपडेट)..."
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-400"
+                autoFocus
+              />
+
+              <textarea
+                rows={3}
+                value={tplBodyInput}
+                onChange={(e) => setTplBodyInput(e.target.value)}
+                placeholder="यहाँ पूरा रेडीमेड संदेश लिखें... (आप {नाम}, {शाखा}, {पद} भी लिख सकते हैं)"
+                className="w-full p-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-400 resize-y"
+              />
+
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center flex-wrap gap-1.5 text-[10px]">
+                  <span className="text-slate-400">वेरिएबल जोड़ें:</span>
+                  {['{नाम}', '{शाखा}', '{पद}'].map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => setTplBodyInput((prev) => `${prev}${prev ? ' ' : ''}${tag}`)}
+                      className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-blue-300 border border-slate-700 rounded font-mono font-bold"
+                    >
+                      +{tag}
+                    </button>
+                  ))}
+                  {activeAttachment && (
+                    <label className="flex items-center space-x-1.5 text-[11px] text-amber-200 ml-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={tplLinkCurrentImage}
+                        onChange={(e) => setTplLinkCurrentImage(e.target.checked)}
+                        className="accent-amber-500 rounded"
+                      />
+                      <span>📎 वर्तमान इमेज ({activeAttachment.name}) इस टेम्पलेट से जोड़ें</span>
+                    </label>
+                  )}
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowTemplateEditor(false);
+                      setEditingTemplateId(null);
+                    }}
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold"
+                  >
+                    रद्द करें
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveTemplate}
+                    className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-lg text-xs shadow-md"
+                  >
+                    💾 टेम्पलेट सेव करें
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Template Chips */}
           <div className="flex flex-wrap gap-1.5">
-            {WHATSAPP_QUICK_TEMPLATES.map((tpl) => (
-              <button
-                key={tpl.id}
-                type="button"
-                onClick={() => setMessageBody(tpl.text)}
-                className={`px-2.5 py-1 rounded-xl text-[11px] font-bold border transition-colors ${
-                  messageBody === tpl.text
-                    ? 'bg-emerald-500 text-slate-950 border-emerald-300 shadow-sm'
-                    : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-emerald-500/50 hover:text-white'
-                }`}
-              >
-                {tpl.label}
-              </button>
-            ))}
+            {templates.map((tpl) => {
+              const isSelected = selectedTemplateId === tpl.id && messageBody === tpl.text;
+              const hasLinkedImage =
+                !!tpl.attachmentId && attachments.some((a) => a.id === tpl.attachmentId);
+              return (
+                <div
+                  key={tpl.id}
+                  className={`inline-flex items-center rounded-xl border transition-all overflow-hidden ${
+                    isSelected
+                      ? 'bg-emerald-500 text-slate-950 border-emerald-300 shadow-sm'
+                      : 'bg-slate-900 text-slate-200 border-slate-700 hover:border-emerald-500/50'
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => handleSelectTemplate(tpl)}
+                    className="px-2.5 py-1.5 text-[11px] font-bold flex items-center space-x-1"
+                  >
+                    <span>{tpl.label}</span>
+                    {hasLinkedImage && (
+                      <Paperclip
+                        className={`w-3 h-3 ${isSelected ? 'text-slate-900' : 'text-amber-300'}`}
+                      />
+                    )}
+                  </button>
+                  {!tpl.isDefault && (
+                    <div
+                      className={`flex items-center border-l ${
+                        isSelected ? 'border-emerald-700/30' : 'border-slate-700/80'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => openEditTemplate(tpl)}
+                        className={`px-1.5 py-1.5 transition-colors ${
+                          isSelected
+                            ? 'text-slate-900 hover:bg-black/10'
+                            : 'text-slate-400 hover:text-blue-300'
+                        }`}
+                        title="टेम्पलेट एडिट करें"
+                      >
+                        <Edit3 className="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteTemplate(tpl)}
+                        className={`px-1.5 py-1.5 transition-colors ${
+                          isSelected
+                            ? 'text-slate-900 hover:bg-black/10'
+                            : 'text-slate-400 hover:text-rose-400'
+                        }`}
+                        title="टेम्पलेट डिलीट करें"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
 
-          <textarea
-            rows={2}
-            value={messageBody}
-            onChange={(e) => setMessageBody(e.target.value)}
-            placeholder="यहाँ अपना WhatsApp संदेश लिखें जो किसी भी स्टाफ को 1 क्लिक में भेजा जा सके..."
-            className="w-full p-3 bg-slate-900 border border-slate-700 rounded-xl text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 resize-y"
-          />
+          {/* Message Textarea + Greeting Toggle */}
+          <div className="space-y-1.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-[11px] text-slate-400 font-semibold">
+                सक्रिय संदेश (Active Message — नीचे हर स्टाफ को यही जाएगा):
+              </span>
+              <label className="flex items-center space-x-1.5 text-[11px] text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={includeGreeting}
+                  onChange={(e) => setIncludeGreeting(e.target.checked)}
+                  className="accent-emerald-500 rounded"
+                />
+                <span>हर स्टाफ का नाम व शाखा जोड़ें (नमस्ते [नाम] जी...)</span>
+              </label>
+            </div>
+            <textarea
+              rows={2}
+              value={messageBody}
+              onChange={(e) => setMessageBody(e.target.value)}
+              placeholder="यहाँ अपना WhatsApp संदेश लिखें जो किसी भी स्टाफ को 1 क्लिक में भेजा जा सके..."
+              className="w-full p-3 bg-slate-900 border border-slate-700 rounded-xl text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 resize-y"
+            />
+          </div>
+
+          {/* OPTION 3: Automatic Image Attachment Panel */}
+          <div className="pt-2.5 border-t border-slate-800/90 space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center space-x-1.5 flex-wrap">
+                <ImageIcon className="w-4 h-4 text-amber-400 shrink-0" />
+                <span className="text-xs font-black text-amber-300">
+                  3️⃣ ऑटो इमेज अटैचमेंट (Auto Image Attachment):
+                </span>
+                {activeAttachment && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-400/40">
+                    ✓ चालू — हर मैसेज के साथ जुड़ेगी
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <input
+                  ref={imageInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleUploadImage}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  disabled={isUploadingImage}
+                  onClick={() => imageInputRef.current?.click()}
+                  className="px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-400/50 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-colors"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>{isUploadingImage ? 'लोड हो रहा...' : 'इमेज चुनें (1 बार अपलोड करें)'}</span>
+                </button>
+              </div>
+            </div>
+
+            {activeAttachment ? (
+              <div className="bg-slate-900/95 border border-amber-400/40 rounded-2xl p-2.5 sm:p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center space-x-3 min-w-0">
+                  <img
+                    src={activeAttachment.dataUrl}
+                    alt={activeAttachment.name}
+                    className="w-14 h-14 rounded-xl object-cover border border-amber-400/40 shadow shrink-0"
+                  />
+                  <div className="min-w-0 space-y-0.5">
+                    <div className="text-xs font-black text-white truncate flex items-center space-x-1.5">
+                      <Paperclip className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span className="truncate">{activeAttachment.name}</span>
+                      <span className="text-[10px] font-mono text-slate-400 shrink-0">
+                        ({activeAttachment.sizeKB} KB)
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-emerald-300">
+                      ✅ अब नीचे किसी भी स्टाफ पर <strong>"📎 इमेज + भेजें"</strong> दबाने पर यह इमेज + मैसेज अपने आप अटैच होगा — बार-बार गैलरी नहीं खोलनी पड़ेगी!
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleSelectAttachment(null)}
+                  className="px-3 py-1.5 bg-rose-950/70 hover:bg-rose-800/70 text-rose-200 border border-rose-500/40 rounded-xl text-xs font-bold shrink-0 self-start sm:self-center"
+                >
+                  अटैचमेंट बंद करें ✕
+                </button>
+              </div>
+            ) : (
+              <p className="text-[11px] text-slate-400">
+                यदि आप मैसेज के साथ कोई सर्कुलर, पोस्टर या फोटो भेजना चाहते हैं तो ऊपर से 1 बार इमेज अपलोड करें — फिर हर स्टाफ को बिना गैलरी खोले ऑटो-अटैच होकर जाएगी।
+              </p>
+            )}
+
+            {/* Saved Image Library Strip (Switch between previously uploaded images in 1 tap) */}
+            {attachments.length > 0 && (
+              <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                <span className="text-[10px] text-slate-400 font-bold shrink-0">सेव इमेज:</span>
+                <button
+                  type="button"
+                  onClick={() => handleSelectAttachment(null)}
+                  className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold border shrink-0 transition-colors ${
+                    !activeAttachment
+                      ? 'bg-slate-700 text-white border-slate-500'
+                      : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
+                  }`}
+                >
+                  सिर्फ टेक्स्ट
+                </button>
+                {attachments.map((att) => {
+                  const isActive = activeAttachmentId === att.id;
+                  return (
+                    <div
+                      key={att.id}
+                      className={`inline-flex items-center rounded-xl border p-1 pr-1.5 space-x-1.5 shrink-0 transition-all ${
+                        isActive
+                          ? 'bg-amber-500/20 border-amber-400 text-amber-100 shadow-sm'
+                          : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-600'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => handleSelectAttachment(att.id)}
+                        className="flex items-center space-x-1.5"
+                      >
+                        <img
+                          src={att.dataUrl}
+                          alt={att.name}
+                          className="w-7 h-7 rounded-lg object-cover border border-slate-700"
+                        />
+                        <span className="text-[11px] font-bold max-w-[95px] truncate">
+                          {att.name}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteAttachment(att.id)}
+                        className="p-0.5 text-slate-500 hover:text-rose-400"
+                        title="इस सेव इमेज को हटाएं"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -496,7 +1061,7 @@ export const DirectWhatsAppTab: React.FC<DirectWhatsAppTabProps> = ({
             const key = getStaffLeaveKey(staff);
             const sentTimestamp = sentMap[key];
             const isBranchHead = staff.position.toUpperCase().includes('BRANCH HEAD');
-            const directWaHref = buildWhatsAppLink(staff, messageBody, includeGreeting);
+            const staffAssigns = getAssignmentsForStaff(staff, branchRoleAssignments);
 
             return (
               <div
@@ -546,26 +1111,22 @@ export const DirectWhatsAppTab: React.FC<DirectWhatsAppTabProps> = ({
                       )}
                     </div>
                     <div className="text-xs font-semibold text-emerald-300 mt-0.5">{staff.position}</div>
-                    {(() => {
-                      const staffAssigns = getAssignmentsForStaff(staff, branchRoleAssignments);
-                      if (staffAssigns.length === 0) return null;
-                      return (
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {staffAssigns.map((a) => {
-                            const role = workRoles.find((r) => r.id === a.roleId);
-                            if (!role) return null;
-                            return (
-                              <span
-                                key={a.id}
-                                className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-fuchsia-500/20 text-fuchsia-200 border border-fuchsia-400/40"
-                              >
-                                {role.icon} {role.shortLabel}
-                              </span>
-                            );
-                          })}
-                        </div>
-                      );
-                    })()}
+                    {staffAssigns.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {staffAssigns.map((a) => {
+                          const role = workRoles.find((r) => r.id === a.roleId);
+                          if (!role) return null;
+                          return (
+                            <span
+                              key={a.id}
+                              className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-fuchsia-500/20 text-fuchsia-200 border border-fuchsia-400/40"
+                            >
+                              {role.icon} {role.shortLabel}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
 
                   {/* Meta & Phone */}
@@ -587,28 +1148,55 @@ export const DirectWhatsAppTab: React.FC<DirectWhatsAppTabProps> = ({
                   </div>
                 </div>
 
-                {/* Action Row: Edit Custom & Direct 1-Tap WhatsApp Send */}
-                <div className="flex items-center space-x-2 pt-2 border-t border-slate-800/80">
+                {/* Action Row: Edit Custom & Direct 1-Tap WhatsApp / WA Business / Auto-Image Send */}
+                <div className="flex items-center space-x-1.5 pt-2 border-t border-slate-800/80">
                   <button
                     type="button"
                     onClick={() => setModalStaff(staff)}
-                    className="px-2.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold flex items-center space-x-1 transition-colors"
+                    className="px-2.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold flex items-center space-x-1 transition-colors shrink-0"
                     title="संदेश एडिट करके भेजें"
                   >
                     <Edit3 className="w-3.5 h-3.5 text-blue-400" />
                     <span>एडिट</span>
                   </button>
 
-                  <a
-                    href={directWaHref}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={() => markStaffSent(staff)}
-                    className="flex-1 py-2 px-3 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white font-black rounded-xl text-xs sm:text-sm flex items-center justify-center space-x-1.5 shadow-md shadow-emerald-950/40 transition-transform active:scale-95"
+                  {activeAttachment && (
+                    <button
+                      type="button"
+                      onClick={() => handleDirectSendToStaff(staff, true)}
+                      className="px-2.5 py-2 bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/40 rounded-xl text-xs font-bold shrink-0"
+                      title="सीधे इस स्टाफ की चैट खोलें (इमेज क्लिपबोर्ड में कॉपी होगी)"
+                    >
+                      💬 चैट
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => handleDirectSendToStaff(staff, false)}
+                    className={`flex-1 py-2 px-3 font-black rounded-xl text-xs sm:text-sm flex items-center justify-center space-x-1.5 shadow-md transition-transform active:scale-95 min-w-0 ${
+                      appMode === 'whatsapp_business'
+                        ? 'bg-gradient-to-r from-teal-600 to-cyan-600 hover:from-teal-500 hover:to-cyan-500 text-white shadow-teal-950/40'
+                        : 'bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white shadow-emerald-950/40'
+                    }`}
                   >
-                    <Send className="w-3.5 h-3.5" />
-                    <span>💬 WhatsApp भेजें</span>
-                  </a>
+                    {activeAttachment ? (
+                      <Paperclip className="w-3.5 h-3.5 shrink-0" />
+                    ) : appMode === 'whatsapp_business' ? (
+                      <Briefcase className="w-3.5 h-3.5 shrink-0" />
+                    ) : (
+                      <Send className="w-3.5 h-3.5 shrink-0" />
+                    )}
+                    <span className="truncate">
+                      {activeAttachment
+                        ? appMode === 'whatsapp_business'
+                          ? '📎 इमेज + Business'
+                          : '📎 इमेज + WhatsApp'
+                        : appMode === 'whatsapp_business'
+                        ? '💼 WA Business'
+                        : '💬 WhatsApp भेजें'}
+                    </span>
+                  </button>
                 </div>
               </div>
             );
@@ -622,8 +1210,12 @@ export const DirectWhatsAppTab: React.FC<DirectWhatsAppTabProps> = ({
         onClose={() => setModalStaff(null)}
         staff={modalStaff}
         initialMessage={messageBody}
+        initialAppMode={appMode}
+        initialAttachment={activeAttachment}
         leaveEntry={modalStaff ? getStaffLeaveEntry(modalStaff, staffLeaves, today) : null}
-        onMarkSent={markStaffSent}
+        onMarkSent={(s) => markStaffSent(s)}
+        onTemplatesChanged={() => setTemplates(loadWhatsAppTemplates())}
+        onAppModeChanged={(mode) => setAppMode(mode)}
       />
     </div>
   );

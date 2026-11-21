@@ -39,6 +39,7 @@ import { RegionalEmployee } from '../data/bhavnagarStaff';
 import { getStaffLeaveEntry, getTodayKey, isStaffOnLeave, playAudioFeedback } from '../utils/storage';
 import { backgroundManager } from '../utils/backgroundManager';
 import { MarkWorkTargetBranch } from './MarkWorkRoleModal';
+import { openWhatsAppChat } from '../utils/whatsapp';
 
 interface AutoDialerModalProps {
   isOpen: boolean;
@@ -431,12 +432,8 @@ export const AutoDialerModal: React.FC<AutoDialerModalProps> = ({
 
   const openWhatsApp = () => {
     if (!currentManager) return;
-    const cleanNumber = currentManager.phone.replace(/[^0-9]/g, '');
-    const fullNumber = cleanNumber.startsWith('91') ? cleanNumber : `91${cleanNumber}`;
-    const text = encodeURIComponent(
-      `Respected ${currentManager.name} Ji (${currentManager.branch} Branch, Sol ID: ${currentManager.solId}),\n\n${settings.whatsappTemplate}`
-    );
-    window.open(`https://wa.me/${fullNumber}?text=${text}`, '_blank');
+    const text = `Respected ${currentManager.name} Ji (${currentManager.branch} Branch, Sol ID: ${currentManager.solId}),\n\n${settings.whatsappTemplate}`;
+    openWhatsAppChat(currentManager.phone, text);
   };
 
   const handleRequestNotif = async () => {

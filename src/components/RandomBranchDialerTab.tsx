@@ -48,6 +48,7 @@ import {
 import { StaffLeaveModal } from './StaffLeaveModal';
 import { StaffWhatsAppModal } from './StaffWhatsAppModal';
 import { MarkWorkTargetBranch } from './MarkWorkRoleModal';
+import { openWhatsAppChat } from '../utils/whatsapp';
 
 interface RandomBranchDialerTabProps {
   managers: BranchManager[];
@@ -390,14 +391,10 @@ export const RandomBranchDialerTab: React.FC<RandomBranchDialerTabProps> = ({
     setAttemptNumber(1);
   };
 
-  // WhatsApp helper
+  // WhatsApp helper (respects user's WhatsApp / WhatsApp Business choice)
   const openWhatsApp = (staff: RegionalEmployee, branchName: string) => {
-    const cleanNumber = staff.phone.replace(/[^0-9]/g, '');
-    const fullNumber = cleanNumber.startsWith('91') ? cleanNumber : `91${cleanNumber}`;
-    const text = encodeURIComponent(
-      `नमस्ते ${staff.name} जी (${staff.position}, ${branchName} शाखा),\n\nरीजनल ऑफिस (RO) भावनगर से कॉल किया जा रहा है। कृपया उपलब्ध होने पर तुरंत कॉल बैक करें। धन्यवाद।`
-    );
-    window.open(`https://wa.me/${fullNumber}?text=${text}`, '_blank');
+    const text = `नमस्ते ${staff.name} जी (${staff.position}, ${branchName} शाखा),\n\nरीजनल ऑफिस (RO) भावनगर से कॉल किया जा रहा है। कृपया उपलब्ध होने पर तुरंत कॉल बैक करें। धन्यवाद।`;
+    openWhatsAppChat(staff.phone, text);
   };
 
   // Density classes
